@@ -395,7 +395,12 @@ def write_samples(dest: Path) -> list[Path]:
 
 
 def main() -> None:
-    """Write the samples into the repo's ``samples/`` folder and list them."""
+    """Write the samples into the repo's ``samples/`` folder and list them.
+
+    The folder is found from this script's own location, so it can be run
+    from any directory. The written files must then be committed: a test
+    checks that the committed samples match this script byte for byte.
+    """
     dest = Path(__file__).resolve().parent.parent / "samples"
     for path in write_samples(dest):
         print(f"wrote {path.relative_to(dest.parent)}")

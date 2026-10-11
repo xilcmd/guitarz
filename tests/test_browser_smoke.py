@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 
+from guitarz.__main__ import default_root
 from guitarz.server import create_app
 
 # Defined here rather than imported from conftest: conftest is pytest-loaded,
@@ -40,6 +41,40 @@ SAMPLE_GP = SAMPLES / "guitarz-demo.gp5"
 LYRIC_GP = SAMPLES / "guitarz-lyrics.gp5"
 DROPD_GP = SAMPLES / "guitarz-dropd.gp5"
 EB_GP = SAMPLES / "guitarz-eb.gp5"
+
+#: Preferred real song for the Guitar Pro 7 smoke test, when the collection has it.
+PREFERRED_GP7 = "Joe Walsh-Funk*.gp"
+
+
+def find_collection_gp7(root: Path) -> Path | None:
+    """Find one real Guitar Pro 7/8 song in the private collection, if any.
+
+    The committed samples are Guitar Pro 5 files (PyGuitarPro cannot write
+    the newer format), but the user's real songs are GP7 ``.gp`` files — a
+    zip container alphaTab parses with a different reader. This finder lets
+    one test keep that reader covered on the dev machine. The song is only
+    copied into a temp folder at test time and never committed; on CI and
+    fresh clones there is no collection, so the test skips. Funk #49 is
+    preferred (7 tracks, long-known to load) so runs are stable; otherwise
+    the first ``.gp`` file by name whose bytes start with the zip signature.
+
+    Args:
+        root: the music collection folder (``$GUITARZ_ROOT`` or ``~/gps``).
+
+    Returns:
+        Path to a GP7 song, or None when the folder or such a song is missing.
+    """
+    if not root.is_dir():
+        return None
+    candidates = sorted(root.glob("**/" + PREFERRED_GP7)) + sorted(root.glob("**/*.gp"))
+    for path in candidates:
+        with path.open("rb") as f:
+            if f.read(4) == b"PK\x03\x04":
+                return path
+    return None
+
+
+COLLECTION_GP7 = find_collection_gp7(default_root())
 
 #: Browser executables tried when nothing is on PATH: the standard install
 #: locations on macOS and Windows, where Chrome is an app, not a command.
@@ -113,6 +148,8 @@ def live_server(tmp_path_factory):
     root = tmp_path_factory.mktemp("music")
     for sample in (SAMPLE_GP, LYRIC_GP, DROPD_GP, EB_GP):
         shutil.copy(sample, root / sample.name)
+    if COLLECTION_GP7 is not None:
+        shutil.copy(COLLECTION_GP7, root / "collection-gp7.gp")
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(
@@ -304,6 +341,38 @@ def test_load_render_and_play(live_server):
         async with chrome_page(_song_url(live_server)) as cdp:
             status = await wait_ready(cdp)
             assert status["rows"] == 7, f"expected 7 track rows: {status}"
+            assert status["playEnabled"], f"player never became ready: {status}"
+
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(8)  # count-in bar + a couple seconds of song
+            state = await cdp.js("Guitarz.conductor.state.api.playerState")
+            pos = await cdp.js("document.getElementById('pos-time').textContent")
+            assert state == 1, f"player not in Playing state: {state}"
+            assert not pos.startswith("0:00 /"), f"position never advanced: {pos}"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(
+    COLLECTION_GP7 is None, reason="no Guitar Pro 7 song in the private collection (dev machine only)"
+)
+def test_real_guitar_pro_7_song_loads_and_plays(live_server):
+    """A real Guitar Pro 7 song from the collection renders and plays.
+
+    The committed samples are all Guitar Pro 5, so without this test nothing
+    would exercise alphaTab's GP7 (zip) reader that every real ``.gp`` song
+    goes through. Spec: the song renders with one rail row per track (and
+    at least one track), the player becomes ready, and playback really
+    advances past the count-in. Runs only where the private collection is
+    present; the file is copied to a temp folder and never committed.
+    """
+
+    async def scenario():
+        url = f"{live_server}/?open={urllib.parse.quote('collection-gp7.gp')}"
+        async with chrome_page(url) as cdp:
+            status = await wait_ready(cdp)
+            tracks = await cdp.js("Guitarz.conductor.state.score.tracks.length")
+            assert tracks > 0 and status["rows"] == tracks, (status, tracks)
             assert status["playEnabled"], f"player never became ready: {status}"
 
             await cdp.js("document.getElementById('btn-play').click()", gesture=True)
