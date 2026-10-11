@@ -9,6 +9,7 @@ vanilla-JS frontend on alphaTab (score rendering + SoundFont playback).
 .venv/bin/pip install -e ".[dev]"      # install with test dependencies
 .venv/bin/pytest                       # full suite (browser smoke auto-skips without Chrome)
 .venv/bin/pytest -m "not browser"      # fast unit loop for red-green cycles
+.venv/bin/ruff check guitarz/ tests/   # lint (CI runs this; must be clean)
 .venv/bin/guitarz                      # run the app at http://127.0.0.1:8008 (serves $GUITARZ_ROOT or ~/gps)
 ./scripts/fetch_vendor.sh              # (re)download alphaTab assets into static/vendor/
 ```
@@ -23,6 +24,16 @@ vanilla-JS frontend on alphaTab (score rendering + SoundFont playback).
   (`tests/test_browser_smoke.py`, marker `browser`). Extend it when adding UI
   behavior; it drives the real app over the Chrome DevTools Protocol.
 - Run the full suite before any commit; all tests green.
+
+## Git workflow
+
+- `master` is protected: work on a branch (`feat/…`, `fix/…`, `chore/…`) and merge
+  by PR (squash). The required check is `test (ubuntu-latest, 3.13)` from
+  `.github/workflows/test.yml`; the other OS/Python jobs are informational.
+- CI cannot run the browser smoke tests (no vendored alphaTab, no `~/gps` songs),
+  so run the full suite locally before opening a PR.
+- The repo is public: never commit Guitar Pro songs from the collection. Only
+  generated fixtures (like `samples/gp5-format-test.gp5`) belong in git.
 
 ## Convention 2: verbose docstrings — every function
 

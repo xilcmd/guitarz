@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from guitarz.server import create_app
 
 
-
 @pytest.fixture()
 def music_root(tmp_path: Path) -> Path:
     """Build a disposable music-root directory tree for backend tests.
