@@ -10,6 +10,21 @@ import pytest
 from guitarz import __main__ as cli
 
 
+def _set_home(monkeypatch, path):
+    """Point ``~`` at ``path`` on every OS for the duration of a test.
+
+    ``Path.expanduser`` reads ``HOME`` on POSIX but ``USERPROFILE`` on
+    Windows, so setting only ``HOME`` left the Windows CI jobs expanding
+    ``~`` to the runner's real profile folder.
+
+    Args:
+        monkeypatch: pytest's monkeypatch fixture.
+        path: directory to use as the home folder.
+    """
+    monkeypatch.setenv("HOME", str(path))
+    monkeypatch.setenv("USERPROFILE", str(path))
+
+
 def test_nonexistent_root_exits_with_usage_error(monkeypatch, tmp_path):
     """``--root`` pointing at a missing directory aborts before serving.
 
@@ -55,7 +70,7 @@ def test_default_root_is_gps_in_home(monkeypatch, tmp_path):
     at the user's home, not at the repo or the current directory.
     """
     monkeypatch.delenv("GUITARZ_ROOT", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
     assert cli.default_root() == tmp_path / "gps"
 
 
@@ -65,7 +80,7 @@ def test_default_root_honors_env_var(monkeypatch, tmp_path):
     Users keep the collection wherever they like; the env var is the one place
     to say so, shared by the CLI and both launcher scripts.
     """
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
     (tmp_path / "elsewhere").mkdir()
     monkeypatch.setenv("GUITARZ_ROOT", "~/elsewhere")
     assert cli.default_root() == tmp_path / "elsewhere"
@@ -81,7 +96,7 @@ def test_stale_env_var_falls_back_to_gps_with_warning(monkeypatch, tmp_path, cap
     default, so ``default_root`` falls back to ``~/gps`` and says why on
     stderr — the user still learns their environment is wrong.
     """
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _set_home(monkeypatch, tmp_path)
     monkeypatch.setenv("GUITARZ_ROOT", "/mnt/c/no/such/guitarz")
     assert cli.default_root() == tmp_path / "gps"
     err = capsys.readouterr().err
