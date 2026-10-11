@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # Fetch the alphaTab distribution (renderer/player JS, Bravura music font, SoundFonts)
 # into static/vendor/alphatab/ so the app is fully self-hosted and works offline.
+#
+# Usage: fetch_vendor.sh [--core] [VERSION]
+#   --core   only alphaTab, the font and the small Sonivox SoundFont (~7 MB);
+#            skips the ~70 MB optional SoundFonts. CI uses this.
 set -euo pipefail
 
+CORE_ONLY=0
+if [ "${1:-}" = "--core" ]; then
+    CORE_ONLY=1
+    shift
+fi
 VERSION="${1:-1.8.4}"
 BASE="https://cdn.jsdelivr.net/npm/@coderline/alphatab@${VERSION}/dist"
 DEST="$(cd "$(dirname "$0")/.." && pwd)/static/vendor/alphatab"
@@ -21,6 +30,11 @@ for f in Bravura.woff2 Bravura.woff Bravura.otf Bravura.svg Bravura.eot Bravura-
 done
 fetch soundfont/sonivox.sf2
 fetch soundfont/LICENSE
+
+if [ "$CORE_ONLY" = 1 ]; then
+    echo "Done (core only; optional SoundFonts skipped)."
+    exit 0
+fi
 
 # Richer SoundFonts for the transport's SoundFont menu (~70 MB total, fetched
 # once). MuseScore General is the app default; sonivox above stays as the

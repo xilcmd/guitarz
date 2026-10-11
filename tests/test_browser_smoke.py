@@ -2,7 +2,7 @@
 
 This is the TDD hook for the frontend. Each test boots the actual FastAPI app
 on a free port, opens it in headless Chrome via the Chrome DevTools Protocol,
-deep-links the bundled Joe Walsh GP7 sample, and asserts real behavior — no
+deep-links the original sample songs in ``samples/``, and asserts real behavior — no
 mocked DOM, no stubbed player.
 
 Skipped automatically when Chrome or the vendored alphaTab assets are absent,
@@ -12,6 +12,7 @@ so the fast unit loop (``pytest -m "not browser"``) never depends on them.
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -24,7 +25,6 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from guitarz.__main__ import default_root
 from guitarz.server import create_app
 
 # Defined here rather than imported from conftest: conftest is pytest-loaded,
@@ -32,106 +32,56 @@ from guitarz.server import create_app
 # elsewhere on sys.path (e.g. via PYTHONPATH leaking from another project).
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The real tab collection lives outside the repo ($GUITARZ_ROOT or ~/gps), so
-# the sample songs are looked up there; tests copy them into tmp roots.
-MUSIC_ROOT = default_root()
+# The sample songs are original tunes committed in samples/ (written by
+# scripts/make_samples.py), so the suite runs on any clone and in CI without
+# touching anyone's private collection.
+SAMPLES = REPO_ROOT / "samples"
+SAMPLE_GP = SAMPLES / "guitarz-demo.gp5"
+LYRIC_GP = SAMPLES / "guitarz-lyrics.gp5"
+DROPD_GP = SAMPLES / "guitarz-dropd.gp5"
+EB_GP = SAMPLES / "guitarz-eb.gp5"
+
+#: Browser executables tried when nothing is on PATH: the standard install
+#: locations on macOS and Windows, where Chrome is an app, not a command.
+CHROME_APP_PATHS = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+]
 
 
-def _find_sample() -> Path | None:
-    """Locate the well-known GP7 sample song anywhere under the music root.
+def find_chrome() -> str | None:
+    """Locate a Chrome or Chromium executable for the headless smoke tests.
 
-    The music collection is user data and gets reorganized freely (it moved
-    out of the repo into ``~/gps`` with key-based subfolders), so
-    hardcoding a location would silently skip every browser test after each
-    reshuffle. Searching by name keeps the suite running wherever the file
-    lives; the tests still skip cleanly if it is gone entirely.
-
-    Returns:
-        Path to the sample ``.gp`` file, or None when it cannot be found.
-    """
-    for p in MUSIC_ROOT.glob("**/Joe Walsh-Funk*.gp"):
-        if ".venv" not in p.parts and "static" not in p.parts:
-            return p
-    return None
-
-
-SAMPLE_GP = _find_sample()
-
-
-def _find_lyric_sample() -> Path | None:
-    """Locate a song whose vocal track carries embedded lyrics.
-
-    The lyrics-preservation feature can only be exercised against a file that
-    actually has per-track lyrics; the Funk #49 sample has none. Black
-    Sabbath's "Children Of The Sea" is used (342 lyric beats on the Dio
-    vocal track) rather than "Man In The Box", whose guitar track carries the
-    beat text "Talk box is used…" — that stray "box" once satisfied a lyric
-    assertion and masked a real regression. Children Of The Sea's only beat
-    text is "pick scrape", so the needle word ``edge`` (from "on the edge of
-    time") can only come from actual lyrics. The dependent test skips when
-    the file is absent.
+    ``$CHROME`` wins when set, then the usual command names on PATH (Linux,
+    CI runners), then the app install locations. Looking only on PATH used
+    to skip every browser test on macOS without a word, because Chrome there
+    lives inside an ``.app`` bundle and is never on PATH.
 
     Returns:
-        Path to the lyric-bearing ``.gp`` file, or None when not found.
+        Path to the browser executable, or None when none is installed.
     """
-    for p in MUSIC_ROOT.glob("**/*Children Of The Sea*.gp"):
-        if ".venv" not in p.parts and "static" not in p.parts:
-            return p
-    return None
+    env = os.environ.get("CHROME")
+    if env and Path(env).exists():
+        return env
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return next((p for p in CHROME_APP_PATHS if Path(p).exists()), None)
 
 
-LYRIC_GP = _find_lyric_sample()
-
-
-def _find_dropd_sample() -> Path | None:
-    """Locate a song from the collection's Drop D folder.
-
-    The collection is sorted by tuning into subfolders, so any ``.gp`` file
-    under a ``DropD`` folder should carry at least one guitar track with the
-    low string tuned down to D. The first one by name is used so the choice
-    is stable between runs; the dependent test skips when there is none.
-
-    Returns:
-        Path to a Drop D ``.gp`` file, or None when not found.
-    """
-    found = sorted(MUSIC_ROOT.glob("**/DropD/*.gp"))
-    return found[0] if found else None
-
-
-DROPD_GP = _find_dropd_sample()
-
-
-def _find_eb_sample() -> Path | None:
-    """Locate a song from the collection's ``D#`` (Eb, half-step-down) folder.
-
-    Songs there are tuned a half step down on every pitched track, which
-    is what the auto-transpose feature must detect (+1 to play along on a
-    standard-tuned guitar). The first file by name keeps the choice stable.
-
-    Returns:
-        Path to an Eb-tuned ``.gp`` file, or None when not found.
-    """
-    found = sorted(MUSIC_ROOT.glob("**/D#/*.gp"))
-    return found[0] if found else None
-
-
-EB_GP = _find_eb_sample()
-
-CHROME = (
-    shutil.which("google-chrome")
-    or shutil.which("chromium")
-    or shutil.which("chromium-browser")
-)
+CHROME = find_chrome()
 VENDOR_JS = REPO_ROOT / "static" / "vendor" / "alphatab" / "alphaTab.min.js"
 
 pytestmark = [
     pytest.mark.browser,
-    pytest.mark.skipif(CHROME is None, reason="no Chrome/Chromium on PATH"),
+    pytest.mark.skipif(CHROME is None, reason="no Chrome/Chromium found (set $CHROME)"),
     pytest.mark.skipif(
         not VENDOR_JS.exists(),
         reason="alphaTab not vendored (run scripts/fetch_vendor.sh)",
     ),
-    pytest.mark.skipif(SAMPLE_GP is None, reason="sample .gp song not found in music root"),
 ]
 
 
@@ -161,13 +111,8 @@ def live_server(tmp_path_factory):
         The server's base URL, e.g. ``http://127.0.0.1:54321``.
     """
     root = tmp_path_factory.mktemp("music")
-    shutil.copy(SAMPLE_GP, root / SAMPLE_GP.name)
-    if LYRIC_GP is not None:
-        shutil.copy(LYRIC_GP, root / LYRIC_GP.name)
-    if DROPD_GP is not None:
-        shutil.copy(DROPD_GP, root / DROPD_GP.name)
-    if EB_GP is not None:
-        shutil.copy(EB_GP, root / EB_GP.name)
+    for sample in (SAMPLE_GP, LYRIC_GP, DROPD_GP, EB_GP):
+        shutil.copy(sample, root / sample.name)
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(
@@ -1136,12 +1081,11 @@ def test_fretboard_dot_labels_toggle_fret_or_note_name(live_server):
     asyncio.run(scenario())
 
 
-@pytest.mark.skipif(DROPD_GP is None, reason="no Drop D .gp song found in music root")
 def test_fretboard_drop_d_tuning(live_server):
     """A Drop D song gets a neck labeled and played in Drop D.
 
     The neck must follow each track's own tuning, not assume standard.
-    Spec, on a file from the collection's DropD folder: (1) some string
+    Spec, on the Drop D sample: (1) some string
     track is in Drop D — low string D2 (MIDI 38), the rest standard
     (A2 D3 G3 B3 E4); (2) choosing it labels the bottom string "D2";
     (3) the dot mapping holds for that tuning (top-row tuning + fret
@@ -1240,13 +1184,12 @@ def test_tuning_offset_rule(live_server):
     asyncio.run(scenario())
 
 
-@pytest.mark.skipif(EB_GP is None, reason="no Eb (D#) .gp song found in music root")
 def test_auto_transpose_from_tuning(live_server):
     """Loading a half-step-down song sets transpose to +1 by itself.
 
     The user plays Eb-tuned songs on a standard-tuned guitar by raising
     playback a semitone. Spec: (1) auto is on by default (``auto`` button
-    lit); (2) loading a song from the D# folder sets transpose to +1 and
+    lit); (2) loading the half-step-down sample sets transpose to +1 and
     the readout shows "+1"; (3) with note names on, the fretboard names the
     notes the standard guitar plays — the open low string reads "E", and
     the bottom string label "E2"; (4) loading a standard song sets 0 again;
@@ -1300,7 +1243,6 @@ def test_auto_transpose_from_tuning(live_server):
     asyncio.run(scenario())
 
 
-@pytest.mark.skipif(LYRIC_GP is None, reason="no lyric-bearing .gp song found in music root")
 def test_hiding_vocal_track_keeps_lyrics_visible(live_server):
     """Hiding a lyric-bearing track moves its lyrics onto a visible track.
 
@@ -1313,11 +1255,10 @@ def test_hiding_vocal_track_keeps_lyrics_visible(live_server):
     track; hiding that carrier moves them again; re-showing the vocal track
     restores the original state with no lyric residue left on other tracks.
 
-    Verified against Children Of The Sea with needle word "edge" (from "on
-    the edge of time") — chosen because syllable hyphenation breaks up most
-    words, and this file's only beat text is "pick scrape", so the needle can
-    only come from real lyrics. Lazy partial rendering is disabled so the
-    whole score's text is present in the DOM.
+    Verified against the "Edge of the Water" sample with needle word "edge"
+    (from "standing at the edge of the water"). The sample has no beat text
+    at all, so the needle can only come from real lyrics. Lazy partial
+    rendering is disabled so the whole score's text is present in the DOM.
     """
 
     async def scenario():
@@ -1355,7 +1296,7 @@ def test_hiding_vocal_track_keeps_lyrics_visible(live_server):
             assert base["hasEdge"], f"baseline: lyrics must be visible: {base}"
             assert base["lyricCounts"][0] > 0, f"vocals must own the lyrics: {base}"
 
-            # Hide the Dio vocals (row 0): staff gone, lyrics carried by track 1.
+            # Hide the vocals (row 0): staff gone, lyrics carried by track 1.
             await cdp.js("document.querySelectorAll('.track-row .btn-eye')[0].click()")
             await asyncio.sleep(8)
             hid = await snapshot()

@@ -30,10 +30,12 @@ vanilla-JS frontend on alphaTab (score rendering + SoundFont playback).
 - `master` is protected: work on a branch (`feat/…`, `fix/…`, `chore/…`) and merge
   by PR (squash). The required check is `test (ubuntu-latest, 3.13)` from
   `.github/workflows/test.yml`; the other OS/Python jobs are informational.
-- CI cannot run the browser smoke tests (no vendored alphaTab, no `~/gps` songs),
-  so run the full suite locally before opening a PR.
+- CI runs the browser smoke tests on Ubuntu only (it fetches alphaTab with
+  `fetch_vendor.sh --core`); still run the full suite locally before a PR.
 - The repo is public: never commit Guitar Pro songs from the collection. Only
-  generated fixtures (like `samples/gp5-format-test.gp5`) belong in git.
+  generated fixtures belong in git: `samples/gp5-format-test.gp5` and the
+  original test songs `samples/guitarz-*.gp5`, written by
+  `scripts/make_samples.py` (re-run it after editing; a test checks they match).
 
 ## Convention 2: verbose docstrings — every function
 

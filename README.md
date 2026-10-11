@@ -69,6 +69,10 @@ python3 -m venv .venv          # add --copies if the repo lives on /mnt/c under 
 ./scripts/fetch_vendor.sh      # downloads alphaTab JS, Bravura font, SoundFonts (one time, ~75 MB)
 ```
 
+The last step is required: without it the page cannot find the alphaTab player
+and every song fails to load. To try the app without your own tabs, run
+`GUITARZ_ROOT=samples .venv/bin/guitarz` to browse the bundled sample songs.
+
 ## Development
 
 This project is TDD: write the failing test first, then the code (see
@@ -154,3 +158,6 @@ that is what the Guitar Pro app associates with.
 - The backend only ever serves files inside `--root` (path-traversal guarded).
 - `samples/gp5-format-test.gp5` is a generated fixture used to verify legacy-format
   loading.
+- `samples/guitarz-*.gp5` are original tunes composed in code by
+  `scripts/make_samples.py` (no copyrighted music). The browser tests run on
+  them, locally and in CI, so no private song collection is needed.

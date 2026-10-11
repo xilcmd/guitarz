@@ -32,8 +32,11 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Lint
         run: ruff check guitarz/ tests/
-      # The headless-Chrome smoke tests need the vendored alphaTab assets and
-      # songs from the private ~/gps collection, neither of which exists on a
-      # runner, so they skip themselves here; they run on the dev machine.
+      # The headless-Chrome smoke tests drive the real app on the original
+      # songs in samples/. Ubuntu runners ship Google Chrome, so only Linux
+      # fetches alphaTab (core only, ~7 MB); elsewhere the browser tests skip.
+      - name: Fetch alphaTab for the browser tests
+        if: runner.os == 'Linux'
+        run: ./scripts/fetch_vendor.sh --core
       - name: Run tests
         run: pytest tests/ -v --tb=short -rs
