@@ -1,11 +1,12 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "guitarz"
 version = "0.1.0"
 description = "Conductor-view Guitar Pro player: every track as tablature with synced SoundFont playback"
+license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
