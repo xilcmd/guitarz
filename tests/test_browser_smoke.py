@@ -465,8 +465,6 @@ def test_local_library_survives_sessions(static_server, tmp_path):
             await cdp.js("document.querySelector('#filelist .file').click()")
             status = await wait_ready(cdp)
             assert status["rows"] == 7
-            assert await cdp.js("document.getElementById('btn-import-files').dispatchEvent(new KeyboardEvent('keydown', {code: 'Space', bubbles: true, cancelable: true}))")
-            assert await cdp.js("Guitarz.conductor.state.api.playerState") != 1
             await cdp.js("document.getElementById('btn-play').click()", gesture=True)
             await asyncio.sleep(8)
             assert await cdp.js("Guitarz.conductor.state.api.playerState") == 1
@@ -540,6 +538,81 @@ def test_load_render_and_play(live_server):
             pos = await cdp.js("document.getElementById('pos-time').textContent")
             assert state == 1, f"player not in Playing state: {state}"
             assert not pos.startswith("0:00 /"), f"position never advanced: {pos}"
+
+    asyncio.run(scenario())
+
+
+def test_space_bar_plays_after_mouse_click_but_presses_keyboard_focused_buttons(live_server):
+    """Space plays/pauses after a mouse click; it presses a button reached by keyboard.
+
+    Regression: making Space press any focused button (so keyboard users can
+    operate buttons) broke the everyday flow of clicking a toggle such as
+    ``loop`` with the mouse and then pressing Space to play — Space toggled
+    the button off again instead. The app tells the two cases apart by the
+    last way the user moved around (Tab vs. a pointer press; Chrome's
+    ``:focus-visible`` turns true on the key press itself, so it cannot).
+    Spec, driven with real CDP mouse and key input: (1) mouse-click
+    ``loop`` (it turns on), press Space — play/pause fires and ``loop`` stays
+    on; (2) press Tab to move keyboard focus to the next button (``✕ loop``),
+    press Space — that button is pressed and play/pause does not fire;
+    (3) with a dialog open, Space never plays.
+    """
+
+    async def key(cdp, code, key_name, vk):
+        """Send one real key press (down + up) through Chrome's input pipeline."""
+        for kind in ("rawKeyDown", "keyUp"):
+            await cdp.send("Input.dispatchKeyEvent", {
+                "type": kind, "code": code, "key": key_name,
+                "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk,
+            })
+        if code == "Space":
+            await cdp.send("Input.dispatchKeyEvent", {"type": "char", "text": " "})
+
+    async def mouse_click(cdp, element_id):
+        """Click an element's center with a real mouse press and release."""
+        box = json.loads(await cdp.js(f"""(() => {{
+            const r = document.getElementById('{element_id}').getBoundingClientRect();
+            return JSON.stringify({{x: r.x + r.width / 2, y: r.y + r.height / 2}});
+        }})()"""))
+        for kind in ("mousePressed", "mouseReleased"):
+            await cdp.send("Input.dispatchMouseEvent", {
+                "type": kind, "x": box["x"], "y": box["y"], "button": "left", "clickCount": 1,
+            })
+
+    async def scenario():
+        async with chrome_page(_song_url(live_server)) as cdp:
+            await wait_ready(cdp)
+            await cdp.js("""(() => {
+                const api = Guitarz.conductor.state.api;
+                window.__playPause = 0;
+                api.playPause = () => { window.__playPause++; };
+                window.__clearLoop = 0;
+                document.getElementById('btn-clearloop')
+                    .addEventListener('click', () => { window.__clearLoop++; });
+            })()""")
+
+            async def snap():
+                """Read the counters, loop state and the focused element."""
+                return json.loads(await cdp.js("""JSON.stringify({
+                    playPause: window.__playPause, clearLoop: window.__clearLoop,
+                    loopOn: document.getElementById('btn-loop').classList.contains('on'),
+                    focused: document.activeElement.id})"""))
+
+            await mouse_click(cdp, "btn-loop")
+            await key(cdp, "Space", " ", 32)
+            after_mouse = await snap()
+            assert after_mouse == {"playPause": 1, "clearLoop": 0, "loopOn": True,
+                                   "focused": "btn-loop"}, after_mouse
+
+            await key(cdp, "Tab", "Tab", 9)
+            await key(cdp, "Space", " ", 32)
+            after_keyboard = await snap()
+            assert after_keyboard == {"playPause": 1, "clearLoop": 1, "loopOn": True,
+                                      "focused": "btn-clearloop"}, after_keyboard
+
+            await mouse_click(cdp, "btn-info")
+            await key(cdp, "Space", " ", 32)
+            assert (await snap())["playPause"] == 1, "Space must not play while a dialog is open"
 
     asyncio.run(scenario())
 

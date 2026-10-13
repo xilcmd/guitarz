@@ -32,6 +32,8 @@
 
   let api = null;
   let endTime = 0;
+  /** True after Tab navigation, false after any pointer press; see spaceMeansPlay. */
+  let navigatingByKeyboard = false;
 
   /**
    * Read the saved SoundFont choice, if any.
@@ -186,13 +188,41 @@
       api.timePosition = ((ev.clientX - rect.left) / rect.width) * endTime;
     };
 
+    // Track how the user last moved around: Tab means keyboard navigation,
+    // any pointer press means mouse/touch (see spaceMeansPlay).
+    document.addEventListener("pointerdown", () => { navigatingByKeyboard = false; }, true);
     document.addEventListener("keydown", (ev) => {
-      if (ev.code === "Space" && !/INPUT|TEXTAREA|SELECT|BUTTON/.test(ev.target.tagName)
-          && !document.querySelector("dialog[open]")) {
-        ev.preventDefault();
+      if (ev.key === "Tab") navigatingByKeyboard = true;
+    }, true);
+    document.addEventListener("keydown", (ev) => {
+      if (ev.code === "Space" && spaceMeansPlay(ev.target)) {
+        ev.preventDefault(); // also stops a mouse-focused button from toggling
         if (!btnPlay.disabled) api.playPause();
       }
     });
+  }
+
+  /**
+   * Decide whether a Space press should play/pause rather than go to the page.
+   *
+   * Text fields and menus need Space for themselves, and an open dialog owns
+   * the keyboard. Buttons are the subtle case: a keyboard user who tabbed to
+   * a button expects Space to press it, but a mouse user who just clicked a
+   * toggle (loop, fretboard, …) expects Space to start the song — the old
+   * global shortcut. ``:focus-visible`` cannot tell them apart here: Chrome
+   * flips it to true on the very key press being handled. So the module
+   * remembers the last way of moving around instead (Tab vs. a pointer
+   * press), which also covers focus that a closing dialog hands back to its
+   * button after a mouse click.
+   *
+   * @param {Element} target - the element the key event was sent to.
+   * @returns {boolean} true when Space should toggle playback.
+   */
+  function spaceMeansPlay(target) {
+    if (document.querySelector("dialog[open]")) return false;
+    if (/INPUT|TEXTAREA|SELECT/.test(target.tagName)) return false;
+    if (target.tagName === "BUTTON" && navigatingByKeyboard) return false;
+    return true;
   }
 
   /**
