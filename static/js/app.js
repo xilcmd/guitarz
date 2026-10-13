@@ -43,6 +43,7 @@
   const api = Guitarz.conductor.init(chosen ? chosen.url : FALLBACK_SOUNDFONT);
   Guitarz.transport.init(api, catalog.fonts, chosen ? chosen.file : null);
   Guitarz.fretboard.init(api); // after conductor.init: needs its track colors
+  Guitarz.sidebar.init(api);
   Guitarz.explorer.init((file) => Guitarz.conductor.loadFile(file));
 
   // Deep link: /?open=<relative path> auto-loads a song. Useful for

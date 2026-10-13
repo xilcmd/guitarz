@@ -43,7 +43,19 @@
 </header>
 
 <div id="main">
+  <div id="sidebar-rail">
+    <button id="btn-sidebar-expand" class="rail-btn" type="button" title="Show files and tracks" aria-label="Show files and tracks">&raquo;</button>
+  </div>
   <aside id="sidebar">
+    <div id="sidebar-tools">
+      <button id="btn-sidebar-pin" class="rail-btn on" type="button" aria-pressed="true" aria-label="Keep this panel open while playing">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+          <path d="M6 1.5h4l-.6 4.2 2.6 2.3H4l2.6-2.3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M8 8v6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="btn-sidebar-collapse" class="rail-btn" type="button" title="Hide files and tracks" aria-label="Hide files and tracks">&laquo;</button>
+    </div>
     <section id="explorer">
       <h2>Files</h2>
       <div id="library-controls">
@@ -74,6 +86,9 @@
       <div id="tracks"><p class="hint">Load a song to see its tracks.</p></div>
     </section>
   </aside>
+  <div id="sidebar-handle" role="separator" aria-orientation="vertical" tabindex="0"
+       aria-label="Resize files and tracks panel (arrow keys; double-click to reset)"
+       title="Drag to resize; double-click to reset"></div>
   <div id="stage">
     <main id="viewport">
       <div id="alphatab"></div>
@@ -149,6 +164,7 @@
 <script src="/js/conductor.js"></script>
 <script src="/js/transport.js"></script>
 <script src="/js/fretboard.js"></script>
+<script src="/js/sidebar.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

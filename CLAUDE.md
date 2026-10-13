@@ -56,6 +56,7 @@ vanilla-JS frontend on alphaTab (score rendering + SoundFont playback).
 - `static/js/` — `app.js` (boot; resolves the SoundFont before alphaTab init),
   `explorer.js` (file tree), `conductor.js` (alphaTab + track rail), `transport.js`
   (playback controls + SoundFont menu), `fretboard.js` (clean-room SVG neck pane;
-  looks/inlays are data in `THEMES`; dots follow `activeBeatsChanged`)
+  looks/inlays are data in `THEMES`; dots follow `activeBeatsChanged`),
+  `sidebar.js` (left column collapse/pin/peek and resize handle)
 - `tests/` — pytest suite; `conftest.py` holds the tmp-root and live-server fixtures
 - `static/vendor/` — fetched alphaTab assets, never hand-edited, gitignored

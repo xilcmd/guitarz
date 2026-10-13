@@ -47,6 +47,12 @@ hardware or drivers needed.
     in `static/js/fretboard.js`, so adding one is a small edit.
 
   All pane choices are remembered per browser.
+- **Room for the tab** — the « button collapses the Files/Tracks column to a thin
+  strip (» brings it back). The pin button sets what happens on play: pinned, the
+  column stays open; unpinned, it hides when playback starts and slides out over
+  the score while you hover the strip. Drag the column's edge to resize it
+  (200px to half the window; arrow keys work on the focused edge; double-click
+  resets). All of this is remembered per browser.
 - **Count-in** — one bar of clicks before playback (toggleable, on by default)
 - **Per-track rail** — mute, solo, volume fader, and show/hide (eye) per track.
   Hiding a track that carries lyrics (the vocal track) removes its confusing tab
