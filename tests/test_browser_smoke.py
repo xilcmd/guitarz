@@ -11,6 +11,8 @@ so the fast unit loop (``pytest -m "not browser"``) never depends on them.
 
 import asyncio
 import contextlib
+import functools
+import http.server
 import json
 import os
 import shutil
@@ -27,6 +29,7 @@ import uvicorn
 
 from guitarz.__main__ import default_root
 from guitarz.server import create_app
+from guitarz.static_build import build_static
 
 # Defined here rather than imported from conftest: conftest is pytest-loaded,
 # and importing it as a module can resolve to an unrelated `tests` package
@@ -231,7 +234,7 @@ class Cdp:
 
 
 @contextlib.asynccontextmanager
-async def chrome_page(url: str):
+async def chrome_page(url: str, profile: Path | None = None):
     """Launch headless Chrome, attach CDP to its page, navigate, and clean up.
 
     A context manager so every test gets a fresh browser (no state bleed
@@ -239,6 +242,7 @@ async def chrome_page(url: str):
 
     Args:
         url: the address to navigate the page to after attaching.
+        profile: optional persistent browser profile for cross-session tests.
 
     Yields:
         A connected :class:`Cdp` driver with the navigation already issued.
@@ -254,6 +258,7 @@ async def chrome_page(url: str):
             "--disable-gpu",
             f"--remote-debugging-port={debug_port}",
             "--window-size=1400,1200",
+            *([f"--user-data-dir={profile}"] if profile else []),
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
@@ -325,6 +330,192 @@ def _song_url(live_server: str) -> str:
         The app URL with the ``?open=`` query for the sample file.
     """
     return f"{live_server}/?open={urllib.parse.quote(SAMPLE_GP.name)}"
+
+
+@pytest.fixture(scope="module")
+def static_server(tmp_path_factory):
+    """Serve the export with a plain HTTP server, without FastAPI or API routes.
+
+    This verifies deployment behavior against the generated artifact rather
+    than accidentally letting the development backend fulfill API requests.
+
+    Yields:
+        Base URL of the static-only server.
+    """
+    output = build_static(tmp_path_factory.mktemp("static-export"))
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(output))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_static_catalog_render_and_play(static_server):
+    """Static catalogs, explorer selection, deep links and playback need no API.
+
+    Inspect actual browser requests to ensure the static branch does not call
+    the Python endpoints, then exercise both deep-link and explorer loading.
+    """
+
+    async def scenario():
+        """Drive the exported site and check real rendering and audio progress."""
+        async with chrome_page(_song_url(static_server)) as cdp:
+            status = await wait_ready(cdp)
+            assert status["rows"] == 7
+            assert status["playEnabled"]
+            assert await cdp.js("document.getElementById('soundfont').value") == "sonivox.sf2"
+            assert await cdp.js("document.querySelectorAll('#filelist li.file').length") == 5
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(8)
+            assert await cdp.js("Guitarz.conductor.state.api.playerState") == 1
+            assert not (await cdp.js("document.getElementById('pos-time').textContent")).startswith("0:00 /")
+            await cdp.js("document.getElementById('btn-stop').click()", gesture=True)
+            await cdp.js("Array.from(document.querySelectorAll('#filelist li.file')).find(el => el.textContent.startsWith('guitarz-eb.gp5')).click()")
+            await wait_ready(cdp)
+            assert await cdp.js("Guitarz.conductor.state.transpose") == 1
+            paths = json.loads(await cdp.js("JSON.stringify(performance.getEntriesByType('resource').map(e => new URL(e.name).pathname))"))
+            assert not any(path.startswith("/api/") for path in paths)
+            assert "/catalog.json" in paths
+            assert "/soundfonts.json" in paths
+            assert "/songs/guitarz-demo.gp5" in paths
+            assert "/songs/guitarz-eb.gp5" in paths
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("server_fixture", ["static_server", "live_server"])
+def test_asset_license_dialog(request, server_fixture):
+    """Licenses are accessible before loading a song in both deployment modes.
+
+    Check that the dialog lists the core assets and integrated libraries,
+    serves every local license link, and returns focus when dismissed.
+    """
+    base = request.getfixturevalue(server_fixture)
+
+    async def scenario():
+        """Open the info dialog and follow its bundled license links."""
+        async with chrome_page(base + "/") as cdp:
+            for _ in range(50):
+                if await cdp.js("Boolean(document.getElementById('btn-info')?.onclick)"):
+                    break
+                await asyncio.sleep(0.1)
+            await cdp.js("document.getElementById('btn-info').click()", gesture=True)
+            assert await cdp.js("document.getElementById('asset-info').open")
+            text = await cdp.js("document.getElementById('asset-info').textContent")
+            for name in ("alphaTab", "MPL-2.0", "Bravura", "SIL Open Font License", "Sonivox", "Apache-2.0", "TinySoundFont", "libvorbis"):
+                assert name in text
+            assert await cdp.js("Array.from(document.querySelectorAll('#asset-info a[href^=\"/\"]')).length") >= 5
+            assert await cdp.js("(async () => { const links = document.querySelectorAll('#asset-info a[href^=\"/\"]'); for (const link of links) { if (link.closest('[hidden]')) continue; const res = await fetch(link.href); if (!res.ok || !(await res.text()).length) return false; } return true; })()")
+            await cdp.js("document.getElementById('asset-info-close').click()", gesture=True)
+            assert not await cdp.js("document.getElementById('asset-info').open")
+            assert await cdp.js("document.activeElement.id") == "btn-info"
+
+    asyncio.run(scenario())
+
+
+def test_local_library_survives_sessions(static_server, tmp_path):
+    """Import a folder, play its song, restart Chrome, then remove local copies.
+
+    Real native file inputs exercise directory paths and unsupported-file
+    filtering. A dedicated profile verifies persistence across browser exits,
+    while request inspection ensures imported files never travel to a server.
+    """
+    profile = tmp_path / "profile"
+    folder = tmp_path / "My Tabs"
+    nested = folder / "Set #1"
+    nested.mkdir(parents=True)
+    song = nested / "riff #1.GP5"
+    shutil.copy(SAMPLE_GP, song)
+    (folder / "notes.txt").write_text("not a song")
+    (folder / ".hidden.gp5").write_bytes(b"private")
+
+    async def choose(cdp, selector, paths):
+        """Select real disk files through Chrome's native file input API."""
+        document = await cdp.send("DOM.getDocument")
+        node = await cdp.send("DOM.querySelector", {"nodeId": document["root"]["nodeId"], "selector": selector})
+        await cdp.js("document.getElementById('library-status').textContent = ''")
+        await cdp.send("DOM.setFileInputFiles", {"nodeId": node["nodeId"], "files": [str(p) for p in paths]})
+        for _ in range(100):
+            if await cdp.js("!document.getElementById('btn-import-files').disabled && document.getElementById('library-status').textContent.length > 0"):
+                break
+            await asyncio.sleep(0.1)
+
+    async def ready(cdp):
+        """Wait until library restoration enables the import controls."""
+        for _ in range(100):
+            if await cdp.js("document.getElementById('btn-import-files') && !document.getElementById('btn-import-files').disabled"):
+                return
+            await asyncio.sleep(0.1)
+        pytest.fail("library UI did not initialize")
+
+    async def scenario():
+        """Exercise import, restoration, replacement, removal and clear controls."""
+        async with chrome_page(static_server + "/", profile) as cdp:
+            await ready(cdp)
+            await choose(cdp, "#import-folder", [folder])
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 1
+            assert await cdp.js("(async () => (await Guitarz.library.list())[0].path)()") == "My Tabs/Set #1/riff #1.GP5"
+            await cdp.js("document.querySelector('#filelist .dir').click()")
+            await cdp.js("document.querySelector('#filelist .dir:not(:first-child)').click()")
+            await cdp.js("document.querySelector('#filelist .file').click()")
+            status = await wait_ready(cdp)
+            assert status["rows"] == 7
+            assert await cdp.js("document.getElementById('btn-import-files').dispatchEvent(new KeyboardEvent('keydown', {code: 'Space', bubbles: true, cancelable: true}))")
+            assert await cdp.js("Guitarz.conductor.state.api.playerState") != 1
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(8)
+            assert await cdp.js("Guitarz.conductor.state.api.playerState") == 1
+            paths = json.loads(await cdp.js("JSON.stringify(performance.getEntriesByType('resource').map(e => new URL(e.name).pathname))"))
+            assert not any(path.startswith("/api/") or path.startswith("/songs/") for path in paths)
+
+        async with chrome_page(static_server + "/", profile) as cdp:
+            await ready(cdp)
+            assert await cdp.js("document.getElementById('library-source').value") == "local"
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 1
+            assert await cdp.js("(async () => (await Guitarz.library.read('My Tabs/Set #1/riff #1.GP5')).size)()") == song.stat().st_size
+            # A mid-batch write failure rolls back all new songs and reports it.
+            await cdp.js("""(() => {
+                const original = IDBObjectStore.prototype.put;
+                let writes = 0;
+                IDBObjectStore.prototype.put = function(...args) {
+                    if (++writes === 2) {
+                        IDBObjectStore.prototype.put = original;
+                        throw new DOMException('Simulated storage exhaustion', 'QuotaExceededError');
+                    }
+                    return original.apply(this, args);
+                };
+            })()""")
+            await choose(cdp, "#import-files", [SAMPLE_GP, LYRIC_GP])
+            assert "storage is full" in await cdp.js("document.getElementById('library-status').textContent")
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 1
+            # File selection adds a root-level entry, then reimport replaces it.
+            await choose(cdp, "#import-files", [SAMPLE_GP])
+            await choose(cdp, "#import-files", [SAMPLE_GP])
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 2
+            await cdp.js("document.querySelector('#filelist .remove-song').click()")
+            for _ in range(50):
+                if await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 1:
+                    break
+                await asyncio.sleep(0.1)
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 1
+            await cdp.js("document.getElementById('btn-clear-library').click()")
+            await cdp.js("document.getElementById('confirm-clear-library').click()")
+            for _ in range(50):
+                if await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 0:
+                    break
+                await asyncio.sleep(0.1)
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 0
+            assert song.exists()
+        async with chrome_page(static_server + "/", profile) as cdp:
+            await ready(cdp)
+            assert await cdp.js("(async () => (await Guitarz.library.list()).length)()") == 0
+
+    asyncio.run(scenario())
 
 
 def test_load_render_and_play(live_server):

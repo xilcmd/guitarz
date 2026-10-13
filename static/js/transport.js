@@ -187,7 +187,8 @@
     };
 
     document.addEventListener("keydown", (ev) => {
-      if (ev.code === "Space" && !/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) {
+      if (ev.code === "Space" && !/INPUT|TEXTAREA|SELECT|BUTTON/.test(ev.target.tagName)
+          && !document.querySelector("dialog[open]")) {
         ev.preventDefault();
         if (!btnPlay.disabled) api.playPause();
       }

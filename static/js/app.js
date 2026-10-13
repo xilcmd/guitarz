@@ -21,7 +21,7 @@
    */
   async function fetchSoundFonts() {
     try {
-      const res = await fetch("/api/soundfonts");
+      const res = await fetch(window.GuitarzStatic ? "/soundfonts.json" : "/api/soundfonts");
       if (!res.ok) throw new Error("server returned " + res.status);
       return await res.json();
     } catch (e) {
@@ -33,6 +33,7 @@
   // Boot font: the viewer's saved menu choice if it still exists, else the
   // server default — chosen before init so the synth loads exactly one font.
   const catalog = await fetchSoundFonts();
+  Guitarz.info.setSoundFonts(catalog.fonts);
   const saved = Guitarz.transport.savedSoundFont();
   const chosen =
     catalog.fonts.find((f) => f.file === saved) ||

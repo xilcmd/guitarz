@@ -9,6 +9,13 @@
 <body>
 <header id="transport">
   <span id="logo">guitarz</span>
+  <button id="btn-info" class="tbtn small" type="button" aria-label="Asset licenses and credits" title="Asset licenses and credits" aria-haspopup="dialog">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="8" cy="5" r="0.85" fill="currentColor"/>
+      <path d="M8 7.5V11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </button>
   <button id="btn-play" class="tbtn big" title="Play / pause (space)" disabled>&#9654;</button>
   <button id="btn-stop" class="tbtn" title="Stop" disabled>&#9632;</button>
   <button id="btn-countin" class="tbtn toggle on" title="One-bar count-in before playback">1·2·3·4</button>
@@ -39,6 +46,26 @@
   <aside id="sidebar">
     <section id="explorer">
       <h2>Files</h2>
+      <div id="library-controls">
+        <div class="import-actions">
+          <button id="btn-import-files" class="tbtn small" type="button" disabled>Open files</button>
+          <button id="btn-import-folder" class="tbtn small" type="button" disabled>Open folder</button>
+        </div>
+        <div id="import-help" class="library-hint">
+          <p>Guitar Pro files: .gp, .gpx, .gp5, .gp4, .gp3.</p>
+          <p>Folders can hold songs directly or use artist/album subfolders, e.g. <code>Artist/Album/song.gp5</code>. Subfolders are kept; unsupported files are skipped.</p>
+        </div>
+        <input id="import-files" type="file" accept=".gp,.gp3,.gp4,.gp5,.gpx" multiple hidden>
+        <input id="import-folder" type="file" webkitdirectory multiple hidden>
+        <label for="library-source">Browse</label>
+        <select id="library-source" disabled>
+          <option value="remote">Samples</option>
+          <option value="local">My library</option>
+        </select>
+        <button id="btn-clear-library" class="tbtn small" type="button" disabled>Clear library</button>
+        <p class="library-hint">Imported songs stay in this browser. Keep your original files.</p>
+        <p id="library-status" role="status" aria-live="polite"></p>
+      </div>
       <nav id="breadcrumb"></nav>
       <ul id="filelist"></ul>
     </section>
@@ -66,6 +93,57 @@
   </div>
 </div>
 
+<dialog id="clear-library-dialog" aria-labelledby="clear-library-title">
+  <h2 id="clear-library-title">Clear your library?</h2>
+  <p>Remove all saved songs from this browser? Your original files will stay on your device.</p>
+  <div class="import-actions">
+    <button id="cancel-clear-library" class="tbtn" type="button" autofocus>Cancel</button>
+    <button id="confirm-clear-library" class="tbtn" type="button">Clear library</button>
+  </div>
+</dialog>
+
+<dialog id="asset-info" aria-labelledby="asset-info-title">
+  <div class="info-heading">
+    <h2 id="asset-info-title">Licenses &amp; credits</h2>
+    <button id="asset-info-close" class="tbtn small" type="button" aria-label="Close licenses and credits" autofocus>Close</button>
+  </div>
+  <p>guitarz uses the following third-party assets. Full license texts and copyright notices are linked below.</p>
+  <ul class="asset-credits">
+    <li><strong>alphaTab 1.8.4</strong> — notation rendering and playback.<br>
+      Copyright © 2026 Daniel Kuschny and Contributors.<br>
+      <a href="/licenses/alphaTab.txt">MPL-2.0 license</a> ·
+      <a href="/licenses/alphaTab-NOTICES.txt">Original bundle notices</a> ·
+      <a href="https://github.com/CoderLine/alphaTab/tree/022a45c8e42370f9e12e68949d11eada370da83d" target="_blank" rel="noopener">Corresponding source code</a>
+    </li>
+    <li><strong>Bravura</strong> — music notation font.<br>
+      Copyright © 2015 Steinberg Media Technologies GmbH. Reserved Font Name: Bravura.<br>
+      <a href="/vendor/alphatab/font/Bravura-OFL.txt">SIL Open Font License 1.1</a>
+    </li>
+    <li><strong>Sonivox</strong> — instrument SoundFont.<br>
+      Copyright (c) 2004–2006 Sonic Network Inc.<br>
+      <a href="/licenses/Apache-2.0.txt">Apache-2.0 license</a> ·
+      <a href="/vendor/alphatab/soundfont/LICENSE">Original SoundFont notice</a>
+    </li>
+  </ul>
+  <details>
+    <summary>Libraries integrated into alphaTab</summary>
+    <p>TinySoundFont (Bernhard Schelling), SFZero (Steve Folta), Haxe Standard Library (Haxe Foundation), SharpZipLib (contributors), and NVorbis (Andrew Ward) use the <a href="/licenses/integrated-MIT.txt">MIT license</a>.</p>
+    <p>libvorbis (Xiph.org Foundation) uses the <a href="/licenses/libvorbis.txt">BSD-3-Clause license</a>.</p>
+    <p>See the <a href="/licenses/alphaTab-NOTICES.txt">original bundle notices</a> for individual copyrights and project links.</p>
+  </details>
+  <ul id="optional-font-credits" class="asset-credits" hidden>
+    <li id="musescore-credit" hidden><strong>MuseScore General</strong> — optional SoundFont.<br>
+      Credits include Frank Wen, Michael Cowgill, S. Christian Collins, Ethan Winer, and Michael Schorsch.<br>
+      <a href="/vendor/alphatab/soundfont/MuseScore_General_License.md">MIT license, credits, and sample notices</a>
+    </li>
+    <li id="generaluser-credit" hidden><strong>GeneralUser GS</strong> — optional SoundFont by S. Christian Collins.<br>
+      <a href="/vendor/alphatab/soundfont/GeneralUser-GS_LICENSE.txt">GeneralUser GS license and sample notices</a>
+    </li>
+  </ul>
+</dialog>
+
+<script src="/js/info.js"></script>
+<script src="/js/library.js"></script>
 <script src="/vendor/alphatab/alphaTab.min.js"></script>
 <script src="/js/explorer.js"></script>
 <script src="/js/conductor.js"></script>

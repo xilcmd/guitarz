@@ -73,6 +73,65 @@ The last step is required: without it the page cannot find the alphaTab player
 and every song fails to load. To try the app without your own tabs, run
 `GUITARZ_ROOT=samples .venv/bin/guitarz` to browse the bundled sample songs.
 
+## Static deployment (Cloudflare)
+
+Build a fully static version with the original bundled sample songs and the
+lightweight Sonivox SoundFont. Python is used only to generate the export;
+the deployed website needs no backend, database, or Functions.
+
+```bash
+bash scripts/fetch_vendor.sh --core
+python -m guitarz.static_build
+python -m http.server 8080 --directory dist/static
+```
+
+Open <http://localhost:8080> to preview, or upload the **contents of `dist/static/`**
+to Cloudflare Pages. For Git-based Pages deployments set:
+
+- **Build command:** `bash scripts/fetch_vendor.sh --core && python -m guitarz.static_build`
+- **Build output directory:** `dist/static`
+
+The output includes `catalog.json`, `soundfonts.json`, and static song files.
+Folder navigation and `/?open=guitarz-demo.gp5` deep links work without an API.
+Only Sonivox is exported, even if richer SoundFonts exist locally. Builds use
+`samples/`, never `$GUITARZ_ROOT` or your private collection. The existing
+Python server still supports your collection.
+
+Re-run the same build command to refresh `dist/static/`. The builder stages a
+complete export before replacing the previous generated site, removes obsolete
+generated files, and leaves other deployment artifacts under `dist/` untouched.
+It refuses to replace unrelated folders or builds containing unmanaged files.
+Use `--output <directory>` for an alternative destination. Serve the site over
+HTTP(S), rather than opening `index.html` with a `file://` URL. Deploy at the
+domain root, since asset paths start with `/`.
+
+The transport's info button opens the asset licenses and credits, including
+alphaTab's integrated libraries, Bravura, and Sonivox. Full license texts are
+included in the export, with a link to the corresponding alphaTab source.
+Optional SoundFont credits appear when those fonts are available on the local
+server. See `static/licenses/README.md` for notice provenance and upgrade notes.
+
+### Your local song library
+
+Click **Open files** to import one or more Guitar Pro files, or **Open folder**
+to import a collection with its subfolders. Supported formats are `.gp`, `.gp3`,
+`.gp4`, `.gp5`, and `.gpx`; hidden and unsupported files are skipped. Folder
+selection is disabled in browsers that do not support it; file import still works.
+
+Songs are copied into IndexedDB on your device, with no uploads. **My library**
+restores across browser sessions at the same site address. Use the **Browse**
+selector to switch between your library and samples (or server files). Importing
+the same relative path replaces its saved copy, so reimport files to pick up
+changes to the originals. Standalone files are stored by filename; folder
+imports retain the selected folder's name and relative subfolders.
+
+The × beside a saved song removes its browser copy. **Clear library** removes
+all saved songs after confirmation. Both leave your originals untouched.
+Browser storage is specific to the browser profile and site origin; it does
+not sync between devices or domains. Clearing site data, private browsing, or
+browser storage eviction can remove saved copies. Keep the original files.
+Storage failures are reported, and failed import batches roll back atomically.
+
 ## Development
 
 This project is TDD: write the failing test first, then the code (see
