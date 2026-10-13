@@ -542,6 +542,230 @@ def test_load_render_and_play(live_server):
     asyncio.run(scenario())
 
 
+async def _center(cdp, selector: str) -> dict:
+    """Return the viewport center of the first element matching ``selector``.
+
+    Args:
+        cdp: driver attached to the page.
+        selector: CSS selector of the element.
+
+    Returns:
+        ``{"x": float, "y": float}`` in CSS pixels.
+    """
+    return json.loads(await cdp.js(f"""(() => {{
+        const r = document.querySelector({json.dumps(selector)}).getBoundingClientRect();
+        return JSON.stringify({{x: r.x + r.width / 2, y: r.y + r.height / 2}});
+    }})()"""))
+
+
+async def _mouse(cdp, kind: str, x: float, y: float, **extra) -> None:
+    """Send one real mouse event through Chrome's input pipeline.
+
+    Real input (not synthetic DOM events) is what pointer capture, hover and
+    double-click detection respond to, so layout tests use it.
+
+    Args:
+        cdp: driver attached to the page.
+        kind: CDP type — ``mouseMoved``, ``mousePressed`` or ``mouseReleased``.
+        x: viewport x in CSS pixels.
+        y: viewport y in CSS pixels.
+        **extra: extra CDP fields (``button``, ``clickCount``, ``buttons``).
+    """
+    await cdp.send("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, **extra})
+
+
+async def _sidebar_layout(cdp) -> dict:
+    """Snapshot the left column's state and the room left for the score.
+
+    Returns:
+        Dict with sidebar visibility/width/position, rail visibility, the
+        collapsed/peek/pinned flags, the viewport width, and the width of
+        the rendered score (to prove alphaTab re-laid out, not just shifted).
+    """
+    return json.loads(await cdp.js("""(() => {
+        const main = document.getElementById('main');
+        const side = document.getElementById('sidebar');
+        const rail = document.getElementById('sidebar-rail');
+        const svgs = [...document.querySelectorAll('#alphatab svg')];
+        return JSON.stringify({
+            sidebarShown: side.offsetWidth > 0,
+            sidebarWidth: side.getBoundingClientRect().width,
+            sidebarFloats: getComputedStyle(side).position === 'absolute',
+            railShown: rail.offsetWidth > 0,
+            collapsed: main.classList.contains('sidebar-collapsed'),
+            peek: main.classList.contains('sidebar-peek'),
+            pinned: document.getElementById('btn-sidebar-pin').classList.contains('on'),
+            viewport: document.getElementById('viewport').getBoundingClientRect().width,
+            scoreWidth: svgs.length
+                ? Math.max(...svgs.map(s => s.getBoundingClientRect().right))
+                  - Math.min(...svgs.map(s => s.getBoundingClientRect().left))
+                : 0,
+        });
+    })()"""))
+
+
+@pytest.mark.parametrize("server_fixture", ["live_server", "static_server"])
+def test_sidebar_collapse_expand_and_persist(request, server_fixture):
+    """The left column collapses to a rail for more tab room, and comes back (#9).
+
+    Spec, in both the server app and the static site: (1) by default the
+    column is open and pinned; (2) the collapse button hides it behind a thin
+    rail, the score viewport gains the column's width, and alphaTab re-lays
+    the score out wider; (3) the rail's expand button restores the column
+    and the original viewport width; (4) collapsed and pinned choices are
+    saved and survive a reload.
+    """
+    base = request.getfixturevalue(server_fixture)
+
+    async def scenario():
+        async with chrome_page(_song_url(base)) as cdp:
+            await wait_ready(cdp)
+            start = await _sidebar_layout(cdp)
+            assert start["sidebarShown"] and not start["railShown"], start
+            assert not start["collapsed"] and start["pinned"], start
+
+            await cdp.js("document.getElementById('btn-sidebar-collapse').click()")
+            await asyncio.sleep(3)  # alphaTab re-layout
+            shut = await _sidebar_layout(cdp)
+            assert shut["collapsed"] and not shut["sidebarShown"] and shut["railShown"], shut
+            assert shut["viewport"] > start["viewport"] + 200, (start, shut)
+            assert shut["scoreWidth"] > start["scoreWidth"] + 150, (start, shut)
+
+            await cdp.js("document.getElementById('btn-sidebar-expand').click()")
+            await asyncio.sleep(1)
+            back = await _sidebar_layout(cdp)
+            assert back["sidebarShown"] and not back["collapsed"], back
+            assert abs(back["viewport"] - start["viewport"]) < 2, (start, back)
+
+            await cdp.js("document.getElementById('btn-sidebar-pin').click()")
+            await cdp.js("document.getElementById('btn-sidebar-collapse').click()")
+            await cdp.send("Page.reload")
+            await wait_ready(cdp)
+            again = await _sidebar_layout(cdp)
+            assert again["collapsed"] and not again["pinned"], again
+
+    asyncio.run(scenario())
+
+
+def test_sidebar_unpinned_hides_on_play_and_peeks_on_hover(live_server):
+    """Unpinned, the column gets out of the way when the song starts (#9).
+
+    Spec: (1) pinned (default), pressing play leaves the column open;
+    (2) unpinned, pressing play collapses it; (3) hovering the rail slides
+    the column out *over* the score — it floats, so the viewport width does
+    not change and the score does not re-lay out under the pointer — and it
+    sits above alphaTab's cursor, which otherwise draws over it; (4) moving
+    the pointer back onto the score hides it again.
+    """
+
+    async def scenario():
+        async with chrome_page(_song_url(live_server)) as cdp:
+            await wait_ready(cdp)
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(1.5)
+            assert not (await _sidebar_layout(cdp))["collapsed"], "pinned must stay open"
+            await cdp.js("document.getElementById('btn-stop').click()")
+
+            await cdp.js("document.getElementById('btn-sidebar-pin').click()")
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(1.5)
+            playing = await _sidebar_layout(cdp)
+            assert playing["collapsed"] and playing["railShown"], playing
+
+            rail = await _center(cdp, "#sidebar-rail")
+            await _mouse(cdp, "mouseMoved", rail["x"], rail["y"])
+            await asyncio.sleep(0.5)
+            peek = await _sidebar_layout(cdp)
+            assert peek["peek"] and peek["sidebarShown"] and peek["sidebarFloats"], peek
+            assert abs(peek["viewport"] - playing["viewport"]) < 2, (playing, peek)
+            # alphaTab's cursor uses a high z-index; the score area must form its
+            # own stacking context or the cursor draws on top of the peek column.
+            assert await cdp.js("getComputedStyle(document.getElementById('stage')).isolation") == "isolate"
+
+            await _mouse(cdp, "mouseMoved", playing["viewport"] * 0.8 + 300, 400)
+            await asyncio.sleep(0.5)
+            gone = await _sidebar_layout(cdp)
+            assert not gone["peek"] and not gone["sidebarShown"], gone
+            await cdp.js("document.getElementById('btn-stop').click()")
+
+    asyncio.run(scenario())
+
+
+def test_sidebar_resize_handle(live_server):
+    """A drag handle on the column's edge resizes it, clamped and saved (#10).
+
+    Spec, with real mouse and key input: (1) the handle is a focusable
+    ``separator`` reporting the width in ``aria-valuenow``; (2) dragging it
+    150px right widens the column by 150px; (3) widths clamp to 200px and to
+    half the window; (4) arrow keys on the focused handle change the width in
+    16px steps; (5) collapse and expand keep the chosen width; (6) the width
+    survives a reload; (7) a double-click resets the default 290px.
+    """
+
+    async def width(cdp):
+        """Read the column width and the handle's reported value."""
+        return json.loads(await cdp.js("""JSON.stringify({
+            w: Math.round(document.getElementById('sidebar').getBoundingClientRect().width),
+            aria: Number(document.getElementById('sidebar-handle').getAttribute('aria-valuenow')),
+            role: document.getElementById('sidebar-handle').getAttribute('role')})"""))
+
+    async def drag_to(cdp, x):
+        """Drag the handle from its center to viewport x."""
+        h = await _center(cdp, "#sidebar-handle")
+        await _mouse(cdp, "mouseMoved", h["x"], h["y"])
+        await _mouse(cdp, "mousePressed", h["x"], h["y"], button="left", clickCount=1, buttons=1)
+        for step in range(1, 6):
+            await _mouse(cdp, "mouseMoved", h["x"] + (x - h["x"]) * step / 5, h["y"],
+                         button="left", buttons=1)
+        await _mouse(cdp, "mouseReleased", x, h["y"], button="left", clickCount=1)
+        await asyncio.sleep(0.3)
+
+    async def key(cdp, code, vk):
+        """Press one key on the focused element."""
+        for kind in ("rawKeyDown", "keyUp"):
+            await cdp.send("Input.dispatchKeyEvent", {
+                "type": kind, "code": code, "key": code, "windowsVirtualKeyCode": vk})
+
+    async def scenario():
+        async with chrome_page(_song_url(live_server)) as cdp:
+            await wait_ready(cdp)
+            start = await width(cdp)
+            assert start == {"w": 290, "aria": 290, "role": "separator"}, start
+            window_w = await cdp.js("window.innerWidth")
+
+            h = await _center(cdp, "#sidebar-handle")
+            await drag_to(cdp, h["x"] + 150)
+            assert (await width(cdp))["w"] == 440
+
+            await drag_to(cdp, window_w - 10)
+            assert (await width(cdp))["w"] == window_w // 2
+            await drag_to(cdp, 20)
+            assert (await width(cdp))["w"] == 200
+
+            await cdp.js("document.getElementById('sidebar-handle').focus()")
+            await key(cdp, "ArrowRight", 39)
+            await key(cdp, "ArrowRight", 39)
+            assert await width(cdp) == {"w": 232, "aria": 232, "role": "separator"}
+
+            await cdp.js("document.getElementById('btn-sidebar-collapse').click()")
+            await cdp.js("document.getElementById('btn-sidebar-expand').click()")
+            assert (await width(cdp))["w"] == 232
+
+            await cdp.send("Page.reload")
+            await wait_ready(cdp)
+            assert (await width(cdp))["w"] == 232
+
+            h = await _center(cdp, "#sidebar-handle")
+            await _mouse(cdp, "mouseMoved", h["x"], h["y"])
+            for count in (1, 2):
+                await _mouse(cdp, "mousePressed", h["x"], h["y"], button="left", clickCount=count)
+                await _mouse(cdp, "mouseReleased", h["x"], h["y"], button="left", clickCount=count)
+            await asyncio.sleep(0.3)
+            assert (await width(cdp))["w"] == 290
+
+    asyncio.run(scenario())
+
+
 def test_space_bar_plays_after_mouse_click_but_presses_keyboard_focused_buttons(live_server):
     """Space plays/pauses after a mouse click; it presses a button reached by keyboard.
 
