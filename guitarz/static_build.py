@@ -7,7 +7,9 @@ and Sonivox directly, with JSON catalogs replacing the live filesystem API.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -172,9 +174,10 @@ def write_static(output: Path, source: Path) -> None:
     }
     (output / "soundfonts.json").write_text(json.dumps(fonts, indent=2), encoding="utf-8")
     index = output / "index.html"
-    index.write_text(index.read_text(encoding="utf-8").replace(
+    html = index.read_text(encoding="utf-8").replace(
         '<script src=', '<script>window.GuitarzStatic = true;</script>\n<script src=', 1
-    ), encoding="utf-8")
+    )
+    index.write_text(add_content_versions(html, output), encoding="utf-8")
     entries = list(output.rglob("*"))
     inventory = {
         "format": 1,
@@ -182,6 +185,42 @@ def write_static(output: Path, source: Path) -> None:
         "dirs": sorted(p.relative_to(output).as_posix() for p in entries if p.is_dir()),
     }
     (output / BUILD_MARKER).write_text(json.dumps(inventory, indent=2), encoding="utf-8")
+
+
+#: Local script and stylesheet references in index.html that get a version token.
+_ASSET_REF = re.compile(
+    r'(<script\b[^>]*\bsrc="|<link\b[^>]*\brel="stylesheet"[^>]*\bhref=")(/[^"?#]+)(")'
+)
+
+
+def add_content_versions(html: str, root: Path) -> str:
+    """Append ``?v=<content hash>`` to every local script and stylesheet URL.
+
+    Static hosts give browsers no reason to re-check an unchanged URL (Python's
+    ``http.server`` and GitHub Pages only send heuristic cache headers), so
+    after a rebuild a browser could pair new HTML with an old ``style.css``:
+    new buttons that seem to do nothing. A fingerprint of each file's bytes in
+    its URL changes exactly when the file does, so updated files are fetched
+    at once and unchanged ones stay cached. Ordinary links (license pages) and
+    references to files that do not exist are left as they are.
+
+    Args:
+        html: the page's HTML.
+        root: folder the URLs are rooted at (the export).
+
+    Returns:
+        The HTML with version tokens added.
+    """
+
+    def version(match: re.Match) -> str:
+        """Rewrite one matched reference, if its file exists."""
+        path = root / match.group(2).lstrip("/")
+        if not path.is_file():
+            return match.group(0)
+        token = hashlib.sha256(path.read_bytes()).hexdigest()[:10]
+        return f"{match.group(1)}{match.group(2)}?v={token}{match.group(3)}"
+
+    return _ASSET_REF.sub(version, html)
 
 
 def main() -> None:

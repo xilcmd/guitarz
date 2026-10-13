@@ -107,6 +107,9 @@ Re-run the same build command to refresh `dist/static/`. The builder stages a
 complete export before replacing the previous generated site, removes obsolete
 generated files, and leaves other deployment artifacts under `dist/` untouched.
 It refuses to replace unrelated folders or builds containing unmanaged files.
+Each script and stylesheet URL in the exported `index.html` carries a
+fingerprint of the file (`style.css?v=3f2a91c0d4`), so browsers fetch the new
+copy right after a rebuild instead of mixing new HTML with old cached files.
 Use `--output <directory>` for an alternative destination. Serve the site over
 HTTP(S), rather than opening `index.html` with a `file://` URL. Deploy at the
 domain root, since asset paths start with `/`.
