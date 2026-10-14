@@ -32,6 +32,8 @@ vanilla-JS frontend on alphaTab (score rendering + SoundFont playback).
   `.github/workflows/test.yml`; the other OS/Python jobs are informational.
 - CI runs the browser smoke tests on Ubuntu only (it fetches alphaTab with
   `fetch_vendor.sh --core`); still run the full suite locally before a PR.
+- Every merge to `master` also deploys the static site to
+  https://xilcmd.github.io/guitarz/ (`.github/workflows/pages.yml`).
 - The repo is public: never commit Guitar Pro songs from the collection. Only
   generated fixtures belong in git: `samples/gp5-format-test.gp5` and the
   original test songs `samples/guitarz-*.gp5`, written by
