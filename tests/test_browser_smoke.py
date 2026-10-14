@@ -1417,6 +1417,70 @@ def test_fretboard_jem_theme_has_24_frets_and_white_vine(live_server):
     asyncio.run(scenario())
 
 
+def test_fretboard_grey_strings_and_quiet_inlays_on_dark_boards(live_server):
+    """Every look uses Maple's grey strings and frets; dark boards dim inlays.
+
+    Musician feedback: the neutral greys of the Maple · blocks look read best
+    for strings and frets on every board, and on dark woods the bright pearl
+    dots / diamonds / vine compete with the note numbers and names. Spec,
+    checked on the rendered SVG of every theme: (1) fret wires stroke
+    ``#8c8c8c`` and strings ``#5e5e5e``; (2) on a dark board (wood luminance
+    below 0.25) every inlay shape — dots, diamonds, vine stem and leaves —
+    shows at an effective opacity of at most 0.4; (3) on the light Maple
+    board the dark block inlays stay clearly visible (at least 0.8).
+    """
+
+    async def scenario():
+        async with chrome_page(_song_url(live_server)) as cdp:
+            await wait_ready(cdp)
+            raw = await cdp.js("""(() => {
+                if (document.getElementById('fretpane').hidden)
+                    document.getElementById('btn-fretboard').click();
+                const lum = hex => {
+                    const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+                        .map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+                    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+                };
+                const effective = el => {
+                    let o = 1;
+                    for (let n = el; n && n.tagName !== 'svg'; n = n.parentNode)
+                        o *= Number(getComputedStyle(n).opacity);
+                    return o;
+                };
+                const sel = document.getElementById('fret-theme');
+                const out = {};
+                for (const [id, theme] of Object.entries(Guitarz.fretboard.THEMES)) {
+                    sel.value = id;
+                    sel.dispatchEvent(new Event('change'));
+                    const svg = document.querySelector('#fretboard svg');
+                    const inlays = [...svg.querySelectorAll('.fb-inlay, .fb-inlay-vine')];
+                    out[id] = {
+                        dark: lum(theme.wood[0]) < 0.25,
+                        frets: [...new Set([...svg.querySelectorAll('.fb-frets line')]
+                            .map(l => l.getAttribute('stroke')))],
+                        strings: [...new Set([...svg.querySelectorAll('.fb-string')]
+                            .map(l => l.getAttribute('stroke')))],
+                        inlays: inlays.length,
+                        maxOpacity: Math.max(...inlays.map(effective)),
+                        minOpacity: Math.min(...inlays.map(effective)),
+                    };
+                }
+                return JSON.stringify(out);
+            })()""")
+            themes = json.loads(raw)
+            assert any(t["dark"] for t in themes.values()), themes
+            for name, t in themes.items():
+                assert t["frets"] == ["#8c8c8c"], (name, t)
+                assert t["strings"] == ["#5e5e5e"], (name, t)
+                assert t["inlays"] > 0, (name, t)
+                if t["dark"]:
+                    assert t["maxOpacity"] <= 0.4, (name, t)
+                else:
+                    assert t["minOpacity"] >= 0.8, (name, t)
+
+    asyncio.run(scenario())
+
+
 def test_fretboard_previews_next_notes_faded(live_server):
     """The board shows the next notes to play as faded dots.
 
