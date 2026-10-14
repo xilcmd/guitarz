@@ -28,50 +28,67 @@
   const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
   /**
+   * Fret wire and string greys shared by every look (from Maple · blocks).
+   *
+   * Musicians reviewing the looks found these neutral greys read best on
+   * every wood: bright, near-white strings and frets competed with the
+   * colored note dots on the dark boards.
+   */
+  const FRET_GREY = "#8c8c8c";
+  const STRING_GREY = "#5e5e5e";
+
+  /**
    * Fretboard looks, keyed by id. Each theme is pure data: wood colors (a
    * two-stop gradient gives the board some depth), fret wire, nut, strings,
-   * an inlay style + color, and optionally ``frets`` — the neck's own fret
-   * count, so a look modeled on a real guitar keeps that guitar's length
-   * even when the song stays low. Adding a look means adding an entry here —
-   * the renderer has one drawing routine per inlay style.
+   * an inlay style, color and opacity, and optionally ``frets`` — the neck's
+   * own fret count, so a look modeled on a real guitar keeps that guitar's
+   * length even when the song stays low. ``inlayOpacity`` applies to the
+   * whole inlay layer: dark boards keep it low (about 0.3) so pearl-white
+   * markers stay a quiet guide instead of pulling the eye away from the note
+   * numbers and names. Adding a look means adding an entry here — the
+   * renderer has one drawing routine per inlay style.
    */
   const THEMES = {
     "rosewood-dots": {
       label: "Rosewood · dots",
       wood: ["#4a2c1f", "#2e1a12"],
-      fret: "#c4c4c4",
+      fret: FRET_GREY,
       nut: "#efe6d0",
-      string: "#d8d2c4",
+      string: STRING_GREY,
       inlay: "dots",
       inlayColor: "#e9e4d8",
+      inlayOpacity: 0.3,
     },
     "ebony-diamonds": {
       label: "Ebony · diamonds",
       wood: ["#221d19", "#0f0c0a"],
-      fret: "#b9bec2",
+      fret: FRET_GREY,
       nut: "#f2ecdc",
-      string: "#d0d3d6",
+      string: STRING_GREY,
       inlay: "diamonds",
       inlayColor: "#d6e2e8",
+      inlayOpacity: 0.3,
     },
     "maple-blocks": {
       label: "Maple · blocks",
       wood: ["#e2c38c", "#c9a265"],
-      fret: "#8c8c8c",
+      fret: FRET_GREY,
       nut: "#2a2a2a",
-      string: "#5e5e5e",
+      string: STRING_GREY,
       inlay: "blocks",
       inlayColor: "#1f1f1f",
+      inlayOpacity: 0.85,
     },
     // The user's Ibanez JEM: rosewood, white vine, 24 frets.
     "rosewood-jem": {
       label: "Rosewood · tree of life · 24 (JEM)",
       wood: ["#4f2f20", "#2b170f"],
-      fret: "#c9c4b8",
+      fret: FRET_GREY,
       nut: "#efe6d0",
-      string: "#d8d2c4",
+      string: STRING_GREY,
       inlay: "tree-of-life",
       inlayColor: "#ffffff",
+      inlayOpacity: 0.3,
       frets: 24,
     },
   };
@@ -391,18 +408,18 @@
         const bw = w * 0.62;
         const bh = h * (m.double ? 0.82 : 0.7);
         el("rect", { class: "fb-inlay", x: x - bw / 2, y: midY - bh / 2, width: bw,
-          height: bh, rx: 2, fill: color, opacity: 0.85 }, g);
+          height: bh, rx: 2, fill: color }, g);
       } else if (theme.inlay === "diamonds") {
         const dw = Math.min(w * 0.36, h * 0.3);
         const dh = h * (m.double ? 0.78 : 0.56);
         const pts = [[x, midY - dh / 2], [x + dw, midY], [x, midY + dh / 2], [x - dw, midY]];
         el("polygon", { class: "fb-inlay", points: pts.map((p) => p.join(",")).join(" "),
-          fill: color, opacity: 0.85 }, g);
+          fill: color }, g);
       } else {
         const r = Math.min(w * 0.18, geom.rowGap * 0.32);
         const ys = m.double ? [top + h * 0.25, top + h * 0.75] : [midY];
         for (const y of ys) {
-          el("circle", { class: "fb-inlay", cx: x, cy: y, r, fill: color, opacity: 0.9 }, g);
+          el("circle", { class: "fb-inlay", cx: x, cy: y, r, fill: color }, g);
         }
       }
     }
@@ -531,7 +548,7 @@
     el("rect", { x: NUT_X, y: BOARD_TOP, width: right - NUT_X,
       height: BOARD_BOTTOM - BOARD_TOP, fill: "url(#fb-wood)" }, root);
 
-    drawInlays(el("g", { class: "fb-inlays" }, root), geom, theme);
+    drawInlays(el("g", { class: "fb-inlays", opacity: theme.inlayOpacity ?? 0.85 }, root), geom, theme);
 
     const frets = el("g", { class: "fb-frets" }, root);
     for (let f = 1; f <= geom.frets; f++) {
