@@ -1,6 +1,8 @@
 """Verify the static export contains everything needed without a backend."""
 
+import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -24,7 +26,14 @@ def static_source(tmp_path):
     """Create a minimal checkout so build tests do not require downloaded assets."""
     source = tmp_path / "source"
     (source / "static" / "js").mkdir(parents=True)
-    (source / "static" / "index.html").write_text('<script src="/js/app.js"></script>')
+    (source / "static" / "css").mkdir()
+    (source / "static" / "css" / "style.css").write_text("body {}")
+    (source / "static" / "index.html").write_text(
+        '<link rel="stylesheet" href="/css/style.css">\n'
+        '<script src="/vendor/alphatab/alphaTab.min.js"></script>\n'
+        '<script src="/js/app.js"></script>\n'
+        '<a href="/licenses/x.txt">license</a>'
+    )
     (source / "static" / "js" / "app.js").write_text("// app")
     vendor = source / "static" / "vendor" / "alphatab"
     (vendor / "font").mkdir(parents=True)
@@ -120,3 +129,51 @@ def test_previous_unmarked_export_can_be_rebuilt(static_source):
     (static_source / "static" / "js" / "app.js").write_text("updated JS")
     build_static(output, static_source)
     assert (output / "js" / "app.js").read_text() == "updated JS"
+
+
+def _version(path: Path) -> str:
+    """Return the cache-busting token the build should use for a file.
+
+    Args:
+        path: file whose bytes are fingerprinted.
+
+    Returns:
+        The first 10 hex digits of the file's SHA-256.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:10]
+
+
+def test_scripts_and_styles_carry_a_content_version(tmp_path, static_source):
+    """Every local script and stylesheet link gets ``?v=<content hash>``.
+
+    Static hosts (python -m http.server, GitHub Pages) let browsers keep old
+    copies of unchanged URLs, so after a rebuild a browser could run new HTML
+    with an old style.css — new buttons that seemingly do nothing. A content
+    fingerprint in the URL changes exactly when the file does, forcing a
+    fresh download then and allowing caching otherwise. Ordinary links (like
+    license pages) are left alone.
+    """
+    output = tmp_path / "site"
+    build_static(output, static_source)
+    html = (output / "index.html").read_text()
+    for url, file in [
+        ("/css/style.css", output / "css" / "style.css"),
+        ("/vendor/alphatab/alphaTab.min.js", output / "vendor" / "alphatab" / "alphaTab.min.js"),
+        ("/js/app.js", output / "js" / "app.js"),
+    ]:
+        assert f'"{url}?v={_version(file)}"' in html, (url, html)
+    assert 'href="/licenses/x.txt"' in html
+    assert len(re.findall(r"\?v=", html)) == 3
+
+
+def test_content_version_changes_only_with_the_file(tmp_path, static_source):
+    """Editing one file changes its version token and leaves the others alone."""
+    output = tmp_path / "site"
+    build_static(output, static_source)
+    before = (output / "index.html").read_text()
+    (static_source / "static" / "js" / "app.js").write_text("// app v2")
+    build_static(output, static_source)
+    after = (output / "index.html").read_text()
+    assert f"/js/app.js?v={_version(output / 'js' / 'app.js')}" in after
+    assert re.search(r"/js/app\.js\?v=\w+", before).group() != re.search(r"/js/app\.js\?v=\w+", after).group()
+    assert re.search(r"/css/style\.css\?v=\w+", before).group() == re.search(r"/css/style\.css\?v=\w+", after).group()
