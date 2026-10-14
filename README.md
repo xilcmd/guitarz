@@ -111,8 +111,9 @@ Each script and stylesheet URL in the exported `index.html` carries a
 fingerprint of the file (`style.css?v=3f2a91c0d4`), so browsers fetch the new
 copy right after a rebuild instead of mixing new HTML with old cached files.
 Use `--output <directory>` for an alternative destination. Serve the site over
-HTTP(S), rather than opening `index.html` with a `file://` URL. Deploy at the
-domain root, since asset paths start with `/`.
+HTTP(S), rather than opening `index.html` with a `file://` URL. All paths are
+relative to the page, so the site works at a domain root and in a folder alike
+(for example GitHub Pages at `https://xilcmd.github.io/guitarz/`).
 
 The transport's info button opens the asset licenses and credits, including
 alphaTab's integrated libraries, Bravura, and Sonivox. Full license texts are

@@ -171,14 +171,14 @@
         data = localListing(currentPath);
       } else if (window.GuitarzStatic) {
         if (!staticCatalog) {
-          const res = await fetch("/catalog.json");
+          const res = await fetch("catalog.json");
           if (!res.ok) throw new Error("catalog unavailable");
           staticCatalog = await res.json();
         }
         data = Object.hasOwn(staticCatalog, path || "") ? staticCatalog[path || ""] : null;
         if (!data) throw new Error("directory not found");
       } else {
-        const res = await fetch("/api/browse?path=" + encodeURIComponent(path || ""));
+        const res = await fetch("api/browse?path=" + encodeURIComponent(path || ""));
         if (!res.ok) throw new Error("directory unavailable");
         data = await res.json();
       }

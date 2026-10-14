@@ -355,6 +355,84 @@ def static_server(tmp_path_factory):
         thread.join(timeout=5)
 
 
+#: Sub-path the static site is published under on GitHub Pages (#11).
+PAGES_PREFIX = "/guitarz/"
+
+
+@pytest.fixture(scope="module")
+def static_subpath_server(tmp_path_factory):
+    """Serve the export under ``/guitarz/``, the way GitHub Pages will host it.
+
+    GitHub project Pages serve a repo's site at ``<user>.github.io/<repo>/``,
+    so every asset and data path must resolve below that folder, not at the
+    domain root. A plain HTTP server rooted one level up reproduces that.
+
+    Yields:
+        Base URL of the server root (the site itself is at ``+ PAGES_PREFIX``).
+    """
+    root = tmp_path_factory.mktemp("pages-root")
+    build_static(root / PAGES_PREFIX.strip("/"))
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_static_site_works_under_a_sub_path(static_subpath_server):
+    """The static site loads, plays and links correctly from ``/guitarz/`` (#11).
+
+    Spec: opened at ``/guitarz/?open=guitarz-demo.gp5`` the demo renders all
+    7 tracks, the sample list loads, the SoundFont makes the player ready,
+    and playback advances; every request the page makes stays inside
+    ``/guitarz/`` (nothing leaks to the domain root, where it would 404 or
+    hit another site), including the music font and the SoundFont; and
+    every visible license link resolves inside ``/guitarz/`` and loads.
+    """
+    site = static_subpath_server + PAGES_PREFIX
+
+    async def scenario():
+        async with chrome_page(site + "?open=" + urllib.parse.quote(SAMPLE_GP.name)) as cdp:
+            status = await wait_ready(cdp)
+            assert status["rows"] == 7 and status["playEnabled"], status
+            assert await cdp.js("document.querySelectorAll('#filelist li.file').length") == 5
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(8)
+            assert await cdp.js("Guitarz.conductor.state.api.playerState") == 1
+            await cdp.js("document.getElementById('btn-stop').click()")
+
+            paths = json.loads(await cdp.js(
+                "JSON.stringify(performance.getEntriesByType('resource')"
+                ".map(e => new URL(e.name)).filter(u => u.origin === location.origin)"
+                ".map(u => u.pathname))"))
+            outside = [p for p in paths if not p.startswith(PAGES_PREFIX)]
+            assert not outside, f"requests escaped {PAGES_PREFIX}: {outside}"
+            for needed in ("vendor/alphatab/font/Bravura.woff2",
+                           "vendor/alphatab/soundfont/sonivox.sf2",
+                           "catalog.json", "songs/" + SAMPLE_GP.name):
+                assert PAGES_PREFIX + needed in paths, (needed, paths)
+
+            links = json.loads(await cdp.js("""(async () => {
+                const out = [];
+                for (const a of document.querySelectorAll('#asset-info a')) {
+                    if (a.closest('[hidden]') || new URL(a.href).origin !== location.origin) continue;
+                    const res = await fetch(a.href);
+                    out.push({path: new URL(a.href).pathname, ok: res.ok});
+                }
+                return JSON.stringify(out);
+            })()"""))
+            assert len(links) >= 5, links
+            bad = [link for link in links if not (link["ok"] and link["path"].startswith(PAGES_PREFIX))]
+            assert not bad, bad
+
+    asyncio.run(scenario())
+
+
 def test_static_catalog_render_and_play(static_server):
     """Static catalogs, explorer selection, deep links and playback need no API.
 
@@ -409,8 +487,8 @@ def test_asset_license_dialog(request, server_fixture):
             text = await cdp.js("document.getElementById('asset-info').textContent")
             for name in ("alphaTab", "MPL-2.0", "Bravura", "SIL Open Font License", "Sonivox", "Apache-2.0", "TinySoundFont", "libvorbis"):
                 assert name in text
-            assert await cdp.js("Array.from(document.querySelectorAll('#asset-info a[href^=\"/\"]')).length") >= 5
-            assert await cdp.js("(async () => { const links = document.querySelectorAll('#asset-info a[href^=\"/\"]'); for (const link of links) { if (link.closest('[hidden]')) continue; const res = await fetch(link.href); if (!res.ok || !(await res.text()).length) return false; } return true; })()")
+            assert await cdp.js("Array.from(document.querySelectorAll('#asset-info a')).filter(a => new URL(a.href).origin === location.origin).length") >= 5
+            assert await cdp.js("(async () => { const links = Array.from(document.querySelectorAll('#asset-info a')).filter(a => new URL(a.href).origin === location.origin); for (const link of links) { if (link.closest('[hidden]')) continue; const res = await fetch(link.href); if (!res.ok || !(await res.text()).length) return false; } return true; })()")
             await cdp.js("document.getElementById('asset-info-close').click()", gesture=True)
             assert not await cdp.js("document.getElementById('asset-info').open")
             assert await cdp.js("document.activeElement.id") == "btn-info"
@@ -1093,6 +1171,8 @@ def test_soundfont_menu_switches_and_persists(live_server):
                 f"fresh profile must start on the server default: {data}"
             )
             default_url = next(f["url"] for f in cat["fonts"] if f["file"] == cat["default"])
+            # alphaTab gets the catalog URL resolved against the page (siteUrl).
+            default_url = await cdp.js(f"new URL({json.dumps(default_url)}, document.baseURI).href")
             assert data["configured"] == default_url, (
                 f"alphaTab must be configured with the default font: {data}"
             )
