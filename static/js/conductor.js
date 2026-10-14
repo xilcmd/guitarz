@@ -150,6 +150,23 @@
   const titleEl = document.getElementById("song-title");
 
   /**
+   * Turn a site-relative path into a full URL based on the page's address.
+   *
+   * Every path in the app is relative (no leading "/") so the same files
+   * work at the domain root (Python server, Cloudflare) and in a folder
+   * such as GitHub Pages' /guitarz/. Paths handed to alphaTab (font folder,
+   * SoundFonts) are made absolute here, because alphaTab may load them from
+   * a worker, where a relative path would not resolve against the page.
+   * Absolute paths and full URLs pass through unchanged.
+   *
+   * @param {string} path - relative path, absolute path, or full URL.
+   * @returns {string} the full URL.
+   */
+  function siteUrl(path) {
+    return new URL(path, document.baseURI).href;
+  }
+
+  /**
    * Show the modal overlay with a status or error message.
    *
    * The overlay doubles as loading indicator and error surface so there is
@@ -194,7 +211,7 @@
     const viewport = document.getElementById("viewport");
     const api = new alphaTab.AlphaTabApi(el, {
       core: {
-        fontDirectory: "/vendor/alphatab/font/",
+        fontDirectory: siteUrl("vendor/alphatab/font/"),
         logLevel: "warning",
       },
       display: {
@@ -271,13 +288,13 @@
         const blob = await Guitarz.library.read(file.path);
         buf = await blob.arrayBuffer();
       } else {
-        let url = "/api/file?path=" + encodeURIComponent(file.path);
+        let url = "api/file?path=" + encodeURIComponent(file.path);
         if (window.GuitarzStatic) {
           const parts = file.path.split("/");
           if (parts.some((part) => !part || part === "." || part === ".." || part.includes("\\"))) {
             throw new Error("invalid song path");
           }
-          url = "/songs/" + parts.map(encodeURIComponent).join("/");
+          url = "songs/" + parts.map(encodeURIComponent).join("/");
         }
         const res = await fetch(url);
         if (!res.ok) throw new Error("server returned " + res.status);
@@ -631,6 +648,7 @@
   }
 
   Guitarz.conductor = {
+    siteUrl,
     init, loadFile, overlay, state, applyTranspose, tuningOffset, setAutoTranspose,
   };
 })();

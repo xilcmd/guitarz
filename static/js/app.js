@@ -8,7 +8,7 @@
   const Guitarz = window.Guitarz;
 
   /** Font used when the catalog can't be fetched; fetch_vendor.sh always installs it. */
-  const FALLBACK_SOUNDFONT = "/vendor/alphatab/soundfont/sonivox.sf2";
+  const FALLBACK_SOUNDFONT = "vendor/alphatab/soundfont/sonivox.sf2";
 
   /**
    * Fetch the SoundFont catalog for the transport menu.
@@ -21,7 +21,7 @@
    */
   async function fetchSoundFonts() {
     try {
-      const res = await fetch(window.GuitarzStatic ? "/soundfonts.json" : "/api/soundfonts");
+      const res = await fetch(window.GuitarzStatic ? "soundfonts.json" : "api/soundfonts");
       if (!res.ok) throw new Error("server returned " + res.status);
       return await res.json();
     } catch (e) {
@@ -40,7 +40,7 @@
     catalog.fonts.find((f) => f.file === catalog.default) ||
     null;
 
-  const api = Guitarz.conductor.init(chosen ? chosen.url : FALLBACK_SOUNDFONT);
+  const api = Guitarz.conductor.init(Guitarz.conductor.siteUrl(chosen ? chosen.url : FALLBACK_SOUNDFONT));
   Guitarz.transport.init(api, catalog.fonts, chosen ? chosen.file : null);
   Guitarz.fretboard.init(api); // after conductor.init: needs its track colors
   Guitarz.sidebar.init(api);

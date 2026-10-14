@@ -177,3 +177,34 @@ def test_content_version_changes_only_with_the_file(tmp_path, static_source):
     assert f"/js/app.js?v={_version(output / 'js' / 'app.js')}" in after
     assert re.search(r"/js/app\.js\?v=\w+", before).group() != re.search(r"/js/app\.js\?v=\w+", after).group()
     assert re.search(r"/css/style\.css\?v=\w+", before).group() == re.search(r"/css/style\.css\?v=\w+", after).group()
+
+
+def test_relative_and_external_references(tmp_path, static_source):
+    """Relative asset links get versions; external URLs are never touched.
+
+    The frontend now uses page-relative paths (``js/app.js``) so the export
+    works inside a sub-folder such as GitHub Pages' ``/guitarz/`` (#11).
+    Fingerprinting must handle those too, and must leave CDN or other
+    external URLs alone because their bytes are not in the export.
+    """
+    (static_source / "static" / "index.html").write_text(
+        '<link rel="stylesheet" href="css/style.css">\n'
+        '<script src="js/app.js"></script>\n'
+        '<script src="https://cdn.example.com/lib.js"></script>\n'
+        '<script src="//cdn.example.com/other.js"></script>'
+    )
+    output = tmp_path / "site"
+    build_static(output, static_source)
+    html = (output / "index.html").read_text()
+    assert f'"css/style.css?v={_version(output / "css" / "style.css")}"' in html
+    assert f'"js/app.js?v={_version(output / "js" / "app.js")}"' in html
+    assert '"https://cdn.example.com/lib.js"' in html
+    assert '"//cdn.example.com/other.js"' in html
+
+
+def test_soundfont_catalog_uses_a_page_relative_url(tmp_path, static_source):
+    """The exported SoundFont URL has no leading slash, so it works in a sub-folder."""
+    output = tmp_path / "site"
+    build_static(output, static_source)
+    fonts = json.loads((output / "soundfonts.json").read_text())
+    assert fonts["fonts"][0]["url"] == "vendor/alphatab/soundfont/sonivox.sf2"

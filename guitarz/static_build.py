@@ -170,7 +170,7 @@ def write_static(output: Path, source: Path) -> None:
     fonts = {
         "default": "sonivox.sf2",
         "fonts": [{"file": "sonivox.sf2", "label": "Sonivox (light)",
-                   "url": "/vendor/alphatab/soundfont/sonivox.sf2"}],
+                   "url": "vendor/alphatab/soundfont/sonivox.sf2"}],
     }
     (output / "soundfonts.json").write_text(json.dumps(fonts, indent=2), encoding="utf-8")
     index = output / "index.html"
@@ -189,7 +189,8 @@ def write_static(output: Path, source: Path) -> None:
 
 #: Local script and stylesheet references in index.html that get a version token.
 _ASSET_REF = re.compile(
-    r'(<script\b[^>]*\bsrc="|<link\b[^>]*\brel="stylesheet"[^>]*\bhref=")(/[^"?#]+)(")'
+    r'(<script\b[^>]*\bsrc="|<link\b[^>]*\brel="stylesheet"[^>]*\bhref=")'
+    r'((?![a-z][a-z0-9+.-]*:|//)[^"?#]+)(")'
 )
 
 
@@ -201,8 +202,9 @@ def add_content_versions(html: str, root: Path) -> str:
     after a rebuild a browser could pair new HTML with an old ``style.css``:
     new buttons that seem to do nothing. A fingerprint of each file's bytes in
     its URL changes exactly when the file does, so updated files are fetched
-    at once and unchanged ones stay cached. Ordinary links (license pages) and
-    references to files that do not exist are left as they are.
+    at once and unchanged ones stay cached. References may be relative
+    (``js/app.js``) or root-absolute (``/js/app.js``); external URLs, ordinary
+    links (license pages) and references to missing files are left as they are.
 
     Args:
         html: the page's HTML.

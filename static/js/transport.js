@@ -282,7 +282,7 @@
       setSwitching(true);
       api.stop();
       api.resetSoundFonts();
-      api.loadSoundFont(font.url, false);
+      api.loadSoundFont(Guitarz.conductor.siteUrl(font.url), false);
     }
 
     api.playerReady.on(() => {
