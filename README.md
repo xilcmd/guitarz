@@ -79,6 +79,14 @@ The last step is required: without it the page cannot find the alphaTab player
 and every song fails to load. To try the app without your own tabs, run
 `GUITARZ_ROOT=samples .venv/bin/guitarz` to browse the bundled sample songs.
 
+## Live demo (GitHub Pages)
+
+The static site is published at **https://xilcmd.github.io/guitarz/** by
+`.github/workflows/pages.yml` on every merge to `master` (it runs the same
+`fetch_vendor.sh --core` + `python -m guitarz.static_build` as below). It
+carries only the original sample songs; your own songs stay on your device via
+**Open files** / **Open folder**.
+
 ## Static deployment (Cloudflare)
 
 Build a fully static version with the original bundled sample songs and the
