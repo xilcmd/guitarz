@@ -433,6 +433,84 @@ def test_static_site_works_under_a_sub_path(static_subpath_server):
     asyncio.run(scenario())
 
 
+#: The real optional SoundFonts; the all-fonts browser test needs them on disk.
+BIG_FONTS = [
+    REPO_ROOT / "static" / "vendor" / "alphatab" / "soundfont" / name
+    for name in ("MuseScore_General.sf3", "GeneralUser-GS.sf2")
+]
+
+
+@pytest.mark.skipif(
+    not all(p.is_file() for p in BIG_FONTS),
+    reason="optional SoundFonts not fetched (run scripts/fetch_vendor.sh without --core)",
+)
+def test_static_site_with_all_soundfonts(tmp_path):
+    """The GitHub Pages build offers all three SoundFonts and plays a big one.
+
+    Spec, on a real ``all_soundfonts`` export served under ``/guitarz/``:
+    (1) the menu lists GeneralUser GS, MuseScore General and Sonivox, with
+    Sonivox selected (big fonts download only on demand); (2) the licenses
+    dialog shows the MuseScore and GeneralUser credits and their license
+    links load from inside ``/guitarz/``; (3) choosing GeneralUser GS loads
+    it and playback advances.
+    """
+    root = tmp_path / "pages-root"
+    build_static(root / PAGES_PREFIX.strip("/"), all_soundfonts=True)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    site = f"http://127.0.0.1:{server.server_port}{PAGES_PREFIX}"
+
+    async def scenario():
+        async with chrome_page(site + "?open=" + urllib.parse.quote(SAMPLE_GP.name)) as cdp:
+            await wait_ready(cdp)
+            menu = json.loads(await cdp.js("""JSON.stringify({
+                options: [...document.getElementById('soundfont').options].map(o => o.textContent),
+                selected: document.getElementById('soundfont').value})"""))
+            assert menu == {"options": ["GeneralUser GS", "MuseScore General", "Sonivox (light)"],
+                            "selected": "sonivox.sf2"}, menu
+
+            credits = json.loads(await cdp.js("""(async () => {
+                const shown = id => !document.getElementById(id).closest('[hidden]');
+                const links = [];
+                for (const id of ['musescore-credit', 'generaluser-credit'])
+                    for (const a of document.querySelectorAll('#' + id + ' a')) {
+                        const res = await fetch(a.href);
+                        links.push({path: new URL(a.href).pathname, ok: res.ok});
+                    }
+                return JSON.stringify({musescore: shown('musescore-credit'),
+                                       generaluser: shown('generaluser-credit'), links});
+            })()"""))
+            assert credits["musescore"] and credits["generaluser"], credits
+            assert credits["links"] and all(
+                link["ok"] and link["path"].startswith(PAGES_PREFIX) for link in credits["links"]
+            ), credits
+
+            await cdp.js("""(() => {
+                window.__sfLoaded = false;
+                Guitarz.conductor.state.api.soundFontLoaded.on(() => { window.__sfLoaded = true; });
+                const sel = document.getElementById('soundfont');
+                sel.value = 'GeneralUser-GS.sf2';
+                sel.dispatchEvent(new Event('change'));
+            })()""")
+            for _ in range(60):
+                await asyncio.sleep(1)
+                if await cdp.js("window.__sfLoaded && !document.getElementById('btn-play').disabled"):
+                    break
+            assert await cdp.js("window.__sfLoaded"), "GeneralUser GS never finished loading"
+            await cdp.js("document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(8)
+            assert await cdp.js("Guitarz.conductor.state.api.playerState") == 1
+            assert not (await cdp.js("document.getElementById('pos-time').textContent")).startswith("0:00 /")
+            await cdp.js("document.getElementById('btn-stop').click()")
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_static_catalog_render_and_play(static_server):
     """Static catalogs, explorer selection, deep links and playback need no API.
 

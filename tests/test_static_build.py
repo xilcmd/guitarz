@@ -16,7 +16,7 @@ def test_cli_defaults_to_static_subdirectory(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(static_build, "REPO_ROOT", tmp_path)
     monkeypatch.setattr("sys.argv", ["guitarz.static_build"])
-    monkeypatch.setattr(static_build, "build_static", lambda output: calls.append(output) or output)
+    monkeypatch.setattr(static_build, "build_static", lambda output, **kw: calls.append(output) or output)
     static_build.main()
     assert calls == [tmp_path / "dist" / "static"]
 
@@ -208,3 +208,91 @@ def test_soundfont_catalog_uses_a_page_relative_url(tmp_path, static_source):
     build_static(output, static_source)
     fonts = json.loads((output / "soundfonts.json").read_text())
     assert fonts["fonts"][0]["url"] == "vendor/alphatab/soundfont/sonivox.sf2"
+
+
+#: The optional SoundFonts fetch_vendor.sh installs, each with its license file.
+OPTIONAL_FONTS = {
+    "MuseScore_General.sf3": "MuseScore_General_License.md",
+    "GeneralUser-GS.sf2": "GeneralUser-GS_LICENSE.txt",
+}
+
+
+def _add_optional_fonts(source: Path) -> Path:
+    """Put fake copies of the big SoundFonts and their licenses in a checkout.
+
+    Args:
+        source: checkout created by the ``static_source`` fixture.
+
+    Returns:
+        The checkout's SoundFont folder.
+    """
+    folder = source / "static" / "vendor" / "alphatab" / "soundfont"
+    for font, license_file in OPTIONAL_FONTS.items():
+        (folder / font).write_bytes(b"font:" + font.encode())
+        (folder / license_file).write_text("license for " + font)
+    return folder
+
+
+def test_all_soundfonts_publishes_the_known_fonts_with_their_licenses(tmp_path, static_source):
+    """``all_soundfonts`` adds MuseScore General and GeneralUser GS (GitHub Pages).
+
+    Cloudflare Pages caps files at 25 MiB, so the default build ships only
+    Sonivox. GitHub Pages takes files up to 100 MB and sites up to 1 GB, so
+    its build can carry the 31 MB and 38 MB fonts the server offers. Spec:
+    (1) both fonts and their license files are copied — the licenses are
+    linked from the info dialog and MuseScore's MIT notice must travel with
+    it; (2) a font without a known license (``huge.sf3``) is never
+    published; (3) the catalog lists the three fonts sorted by label with
+    the server's labels and page-relative URLs; (4) Sonivox stays the
+    default, so visitors download a big font only when they pick it.
+    """
+    _add_optional_fonts(static_source)
+    output = tmp_path / "site"
+    build_static(output, static_source, all_soundfonts=True)
+
+    shipped = sorted(p.name for p in (output / "vendor" / "alphatab" / "soundfont").iterdir())
+    assert shipped == sorted(["sonivox.sf2", "LICENSE", *OPTIONAL_FONTS, *OPTIONAL_FONTS.values()])
+    fonts = json.loads((output / "soundfonts.json").read_text())
+    assert fonts["default"] == "sonivox.sf2"
+    assert fonts["fonts"] == [
+        {"file": "GeneralUser-GS.sf2", "label": "GeneralUser GS",
+         "url": "vendor/alphatab/soundfont/GeneralUser-GS.sf2"},
+        {"file": "MuseScore_General.sf3", "label": "MuseScore General",
+         "url": "vendor/alphatab/soundfont/MuseScore_General.sf3"},
+        {"file": "sonivox.sf2", "label": "Sonivox (light)",
+         "url": "vendor/alphatab/soundfont/sonivox.sf2"},
+    ]
+
+
+def test_all_soundfonts_refuses_to_publish_without_every_known_font(tmp_path, static_source):
+    """A missing big font stops the build instead of silently dropping it.
+
+    The flag is a promise that the published menu matches the server's; a
+    failed download in CI must fail the deploy loudly, naming the file.
+    """
+    folder = _add_optional_fonts(static_source)
+    (folder / "GeneralUser-GS.sf2").unlink()
+    with pytest.raises(FileNotFoundError, match="GeneralUser-GS.sf2"):
+        build_static(tmp_path / "site", static_source, all_soundfonts=True)
+    assert not (tmp_path / "site").exists()
+
+
+def test_default_build_still_ships_only_sonivox(tmp_path, static_source):
+    """Without the flag the Cloudflare-sized build is unchanged: Sonivox only."""
+    _add_optional_fonts(static_source)
+    output = tmp_path / "site"
+    build_static(output, static_source)
+    shipped = sorted(p.name for p in (output / "vendor" / "alphatab" / "soundfont").iterdir())
+    assert shipped == ["LICENSE", "sonivox.sf2"]
+    assert [f["file"] for f in json.loads((output / "soundfonts.json").read_text())["fonts"]] == ["sonivox.sf2"]
+
+
+def test_cli_all_soundfonts_flag(monkeypatch, tmp_path):
+    """``--all-soundfonts`` on the command line reaches the builder."""
+    calls = []
+    monkeypatch.setattr(static_build, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr("sys.argv", ["guitarz.static_build", "--all-soundfonts"])
+    monkeypatch.setattr(static_build, "build_static",
+                        lambda output, all_soundfonts=False: calls.append((output, all_soundfonts)) or output)
+    static_build.main()
+    assert calls == [(tmp_path / "dist" / "static", True)]

@@ -14,6 +14,8 @@ import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from .soundfonts import CORE_SOUNDFONT, SOUNDFONT_LICENSES, soundfont_label
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {".gp", ".gp3", ".gp4", ".gp5", ".gpx"}
 BUILD_MARKER = ".guitarz-static.json"
@@ -71,17 +73,20 @@ def validate_output(output: Path, source: Path) -> None:
     raise FileExistsError(f"Output is not a recognized guitarz static build: {output}")
 
 
-def build_static(output: Path, source: Path = REPO_ROOT) -> Path:
+def build_static(output: Path, source: Path = REPO_ROOT, all_soundfonts: bool = False) -> Path:
     """Build and replace a generated static site without disturbing other data.
 
     A static-mode flag selects JSON catalogs and direct song URLs in the same
-    frontend used by the local server. Optional large SoundFonts are excluded.
+    frontend used by the local server. By default only the small Sonivox
+    SoundFont ships (Cloudflare Pages caps files at 25 MiB); ``all_soundfonts``
+    adds every known font with its license (GitHub Pages allows 100 MB files).
     Stage the complete export before replacing a recognized previous build.
     Failed builds leave the previous export intact; unrelated data is refused.
 
     Args:
         output: destination directory, including a previous generated export.
         source: source checkout containing static/ and samples/.
+        all_soundfonts: also publish MuseScore General and GeneralUser GS.
 
     Returns:
         The absolute output path, ready to upload to a static host.
@@ -100,7 +105,7 @@ def build_static(output: Path, source: Path = REPO_ROOT) -> Path:
         staging_root = Path(temporary).resolve()
         staged = staging_root / "site"
         previous = staging_root / "previous"
-        write_static(staged, source)
+        write_static(staged, source, all_soundfonts)
         # The temporary root is created beside output. Only a validated export
         # can be moved inside it for cleanup, never a source or unrelated tree.
         assert staging_root.parent == output.parent and previous.is_relative_to(staging_root)
@@ -116,7 +121,7 @@ def build_static(output: Path, source: Path = REPO_ROOT) -> Path:
     return output
 
 
-def write_static(output: Path, source: Path) -> None:
+def write_static(output: Path, source: Path, all_soundfonts: bool = False) -> None:
     """Assemble the static payload and ownership inventory in a staging folder.
 
     All reads, downloads checks and copies finish here before the public export
@@ -125,9 +130,13 @@ def write_static(output: Path, source: Path) -> None:
     Args:
         output: fresh staging directory.
         source: source checkout containing static/ and samples/.
+        all_soundfonts: publish every font in ``SOUNDFONT_LICENSES``, each
+            with its license file, instead of Sonivox alone.
 
     Raises:
-        FileNotFoundError: required source assets are missing.
+        FileNotFoundError: required source assets are missing — including,
+            with ``all_soundfonts``, any known font or its license, so a
+            failed download fails the deploy instead of shrinking the menu.
     """
     static = source / "static"
     vendor = static / "vendor" / "alphatab"
@@ -135,6 +144,17 @@ def write_static(output: Path, source: Path) -> None:
                   vendor / "soundfont" / "sonivox.sf2", vendor / "soundfont" / "LICENSE"):
         if not asset.is_file():
             raise FileNotFoundError(f"Missing {asset}; run bash scripts/fetch_vendor.sh --core")
+    published = sorted(SOUNDFONT_LICENSES) if all_soundfonts else [CORE_SOUNDFONT]
+    missing = [
+        name
+        for font in published
+        for name in (font, SOUNDFONT_LICENSES[font])
+        if not (vendor / "soundfont" / name).is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing SoundFont files {', '.join(missing)}; run bash scripts/fetch_vendor.sh"
+        )
     # Copy the source UI separately from vendor assets so optional fonts can
     # never accidentally slip into the published output.
     shutil.copytree(static, output, ignore=shutil.ignore_patterns("vendor", BUILD_MARKER), dirs_exist_ok=True)
@@ -142,8 +162,9 @@ def write_static(output: Path, source: Path) -> None:
     shutil.copytree(vendor / "font", target_vendor / "font")
     shutil.copy2(vendor / "alphaTab.min.js", target_vendor / "alphaTab.min.js")
     (target_vendor / "soundfont").mkdir()
-    for name in ("sonivox.sf2", "LICENSE"):
-        shutil.copy2(vendor / "soundfont" / name, target_vendor / "soundfont" / name)
+    for font in published:
+        for name in (font, SOUNDFONT_LICENSES[font]):
+            shutil.copy2(vendor / "soundfont" / name, target_vendor / "soundfont" / name)
 
     songs = source / "samples"
     catalog = {}
@@ -167,10 +188,15 @@ def write_static(output: Path, source: Path) -> None:
                 shutil.copy2(entry, destination)
         catalog[key] = listing
     (output / "catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Same shape and label order as the server's /api/soundfonts. Sonivox
+    # stays the default so visitors download a big font only when chosen.
+    entries = [
+        {"file": font, "label": soundfont_label(font), "url": "vendor/alphatab/soundfont/" + font}
+        for font in published
+    ]
     fonts = {
-        "default": "sonivox.sf2",
-        "fonts": [{"file": "sonivox.sf2", "label": "Sonivox (light)",
-                   "url": "vendor/alphatab/soundfont/sonivox.sf2"}],
+        "default": CORE_SOUNDFONT,
+        "fonts": sorted(entries, key=lambda f: f["label"].lower()),
     }
     (output / "soundfonts.json").write_text(json.dumps(fonts, indent=2), encoding="utf-8")
     index = output / "index.html"
@@ -236,9 +262,14 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=REPO_ROOT / "dist" / "static")
+    parser.add_argument(
+        "--all-soundfonts",
+        action="store_true",
+        help="also publish MuseScore General and GeneralUser GS (too big for Cloudflare; fine on GitHub Pages)",
+    )
     args = parser.parse_args()
     try:
-        result = build_static(args.output)
+        result = build_static(args.output, all_soundfonts=args.all_soundfonts)
     except OSError as exc:
         parser.error(str(exc))
     print(f"Static site built in {result}")
