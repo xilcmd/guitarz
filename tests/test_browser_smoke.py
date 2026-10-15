@@ -1214,6 +1214,57 @@ def test_global_transpose_stepper(live_server):
     asyncio.run(scenario())
 
 
+def test_soundfont_switch_unlocks_only_after_the_real_load(live_server):
+    """Over a slow network, play is not unlocked until the new font has arrived.
+
+    Regression, seen on GitHub Pages with the 38 MB MuseScore General: the
+    switch called alphaTab's ``resetSoundFonts()``, which itself fires
+    ``soundFontLoaded`` at once. The menu took that as "done", unlocked play,
+    and the real load landing seconds later stopped the song again. Locally
+    the font comes off disk instantly, so the two events coincided and no
+    test noticed. Spec, with the download throttled to ~0.5 MB/s so Sonivox
+    (1.3 MB) takes a few seconds: (1) the play button stays disabled for at
+    least a second after the switch starts; (2) once it unlocks and play is
+    pressed, playback keeps going — it is still Playing three seconds later
+    and was never stopped in between.
+    """
+
+    async def scenario():
+        async with chrome_page(_song_url(live_server)) as cdp:
+            await wait_ready(cdp)
+            await cdp.send("Network.enable")
+            await cdp.send("Network.emulateNetworkConditions", {
+                "offline": False, "latency": 50,
+                "downloadThroughput": 500 * 1024, "uploadThroughput": 500 * 1024,
+            })
+            await cdp.js("""(() => {
+                const api = Guitarz.conductor.state.api;
+                window.__stops = 0;
+                api.playerStateChanged.on(e => { if (window.__armed && e.state !== 1) window.__stops++; });
+                window.__t0 = performance.now();
+                const sel = document.getElementById('soundfont');
+                sel.value = 'sonivox.sf2';
+                sel.dispatchEvent(new Event('change'));
+            })()""")
+            unlocked_after = None
+            for _ in range(120):
+                await asyncio.sleep(0.25)
+                if await cdp.js("!document.getElementById('btn-play').disabled"):
+                    unlocked_after = await cdp.js("(performance.now() - window.__t0) / 1000")
+                    break
+            assert unlocked_after is not None, "play never unlocked after the switch"
+            assert unlocked_after >= 1.0, f"play unlocked after {unlocked_after:.2f}s, before the font arrived"
+
+            await cdp.js("window.__armed = true; document.getElementById('btn-play').click()", gesture=True)
+            await asyncio.sleep(3)
+            state = await cdp.js("Guitarz.conductor.state.api.playerState")
+            stops = await cdp.js("window.__stops")
+            await cdp.js("document.getElementById('btn-stop').click()")
+            assert state == 1 and stops == 0, f"playback was interrupted: state={state} stops={stops}"
+
+    asyncio.run(scenario())
+
+
 def test_soundfont_menu_switches_and_persists(live_server):
     """The transport's SoundFont menu mirrors the catalog, switches live, and persists.
 

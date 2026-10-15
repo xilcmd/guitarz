@@ -231,8 +231,11 @@
    * Switching swaps the synth's instrument samples in place: playback is
    * stopped first (a font change mid-note would glitch), the transport is
    * locked while the new font downloads and decodes (MuseScore General is
-   * ~38 MB), and resetSoundFonts() precedes the load so the fonts replace
-   * rather than layer. The loaded song, loop range, speed and transpose all
+   * ~38 MB), and loadSoundFont(url, false) — append = false — replaces the
+   * old font rather than layering on it. resetSoundFonts() is deliberately
+   * NOT called first: alphaTab fires soundFontLoaded from the reset itself,
+   * which unlocked play long before a big font arrived over the network, and
+   * the real load then stopped the song. The loaded song, loop range, speed and transpose all
    * survive because they live on the api/score, not in the synth's font
    * bank. The choice is saved only once the font has actually loaded; if the
    * load fails (alphaTab reports it via api.error, which the conductor shows
@@ -281,7 +284,6 @@
       pending = file;
       setSwitching(true);
       api.stop();
-      api.resetSoundFonts();
       api.loadSoundFont(Guitarz.conductor.siteUrl(font.url), false);
     }
 
