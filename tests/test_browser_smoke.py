@@ -1232,7 +1232,14 @@ def test_soundfont_switch_unlocks_only_after_the_real_load(live_server):
     async def scenario():
         async with chrome_page(_song_url(live_server)) as cdp:
             await wait_ready(cdp)
+            # Start on Sonivox like CI (the only font fetched there), and turn
+            # the HTTP cache off: otherwise the font already downloaded at boot
+            # is served from cache instantly and the throttle never applies.
+            await cdp.js("localStorage.setItem('guitarz.soundfont', 'sonivox.sf2')")
+            await cdp.send("Page.reload")
+            await wait_ready(cdp)
             await cdp.send("Network.enable")
+            await cdp.send("Network.setCacheDisabled", {"cacheDisabled": True})
             await cdp.send("Network.emulateNetworkConditions", {
                 "offline": False, "latency": 50,
                 "downloadThroughput": 500 * 1024, "uploadThroughput": 500 * 1024,
