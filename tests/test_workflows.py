@@ -27,15 +27,31 @@ def test_pages_workflow_deploys_master_and_on_demand():
     assert "workflow_dispatch:" in text
 
 
-def test_pages_workflow_builds_the_core_static_site():
-    """It fetches only the core alphaTab assets and runs the static builder.
+def test_pages_workflow_builds_with_every_soundfont():
+    """It fetches the full font set and builds with ``--all-soundfonts``.
 
-    ``--core`` keeps the large optional SoundFonts out of the download, and
-    the builder only ever reads ``samples/`` — never a private collection.
+    GitHub Pages allows 100 MB files and 1 GB sites, so unlike the
+    Cloudflare-sized default build, the Pages site carries MuseScore General
+    and GeneralUser GS like the Python server does. The builder still only
+    reads ``samples/`` for songs — never a private collection.
     """
     text = _workflow()
-    assert "./scripts/fetch_vendor.sh --core" in text
-    assert "python -m guitarz.static_build" in text
+    assert "./scripts/fetch_vendor.sh\n" in text and "fetch_vendor.sh --core" not in text
+    assert "python -m guitarz.static_build --all-soundfonts" in text
+
+
+def test_pages_workflow_caches_the_big_soundfonts():
+    """The ~70 MB of optional fonts are cached between deploys.
+
+    fetch_vendor.sh skips files that already exist, so restoring them from
+    ``actions/cache`` keeps each deploy from re-downloading them from the
+    font authors' servers (GeneralUser's author asks sites to host their own
+    copy rather than lean on his downloads).
+    """
+    text = _workflow()
+    assert "actions/cache@" in text
+    for name in ("MuseScore_General.sf3", "GeneralUser-GS.sf2"):
+        assert "static/vendor/alphatab/soundfont/" + name in text
 
 
 def test_pages_workflow_publishes_the_build_output_with_least_privilege():

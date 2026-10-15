@@ -82,10 +82,13 @@ and every song fails to load. To try the app without your own tabs, run
 ## Live demo (GitHub Pages)
 
 The static site is published at **https://xilcmd.github.io/guitarz/** by
-`.github/workflows/pages.yml` on every merge to `master` (it runs the same
-`fetch_vendor.sh --core` + `python -m guitarz.static_build` as below). It
-carries only the original sample songs; your own songs stay on your device via
-**Open files** / **Open folder**.
+`.github/workflows/pages.yml` on every merge to `master`. It runs the full
+`fetch_vendor.sh` and `python -m guitarz.static_build --all-soundfonts`, so the
+SoundFont menu offers MuseScore General and GeneralUser GS like the Python
+server (GitHub Pages allows files up to 100 MB; the big fonts are cached
+between deploys). Sonivox stays the default, so visitors download a big font
+only when they pick it. The site carries only the original sample songs; your
+own songs stay on your device via **Open files** / **Open folder**.
 
 ## Static deployment (Cloudflare)
 
@@ -107,7 +110,11 @@ to Cloudflare Pages. For Git-based Pages deployments set:
 
 The output includes `catalog.json`, `soundfonts.json`, and static song files.
 Folder navigation and `/?open=guitarz-demo.gp5` deep links work without an API.
-Only Sonivox is exported, even if richer SoundFonts exist locally. Builds use
+Only Sonivox is exported by default, even if richer SoundFonts exist locally:
+Cloudflare Pages rejects files over 25 MiB, and MuseScore General (38 MB) and
+GeneralUser GS (31 MB) are bigger. On hosts without that limit, add
+`--all-soundfonts` to also publish both, each with its license file (the build
+stops if one is missing). Builds use
 `samples/`, never `$GUITARZ_ROOT` or your private collection. The existing
 Python server still supports your collection.
 

@@ -1,7 +1,7 @@
 name: Deploy static site to GitHub Pages
 
-# Publishes the static build (sample songs + Sonivox only, never a private
-# collection) to https://xilcmd.github.io/guitarz/ on every merge to master.
+# Publishes the static build (sample songs + all three SoundFonts, never a
+# private collection) to https://xilcmd.github.io/guitarz/ on every merge to master.
 # All app paths are page-relative (#14), so the site works in that folder.
 
 on:
@@ -27,11 +27,25 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Fetch alphaTab (core only, ~7 MB)
-        run: ./scripts/fetch_vendor.sh --core
+      # The big optional SoundFonts (~70 MB) rarely change: keep them between
+      # deploys. fetch_vendor.sh skips files that already exist, so a cache
+      # hit means no download from the font authors' servers.
+      - name: Restore cached SoundFonts
+        uses: actions/cache@v4
+        with:
+          path: |
+            static/vendor/alphatab/soundfont/MuseScore_General.sf3
+            static/vendor/alphatab/soundfont/MuseScore_General_License.md
+            static/vendor/alphatab/soundfont/GeneralUser-GS.sf2
+            static/vendor/alphatab/soundfont/GeneralUser-GS_LICENSE.txt
+          key: soundfonts-${{ hashFiles('scripts/fetch_vendor.sh') }}
+      - name: Fetch alphaTab and every SoundFont
+        run: ./scripts/fetch_vendor.sh
       - name: Build the static site
         # The builder uses only the standard library; no install needed.
-        run: python -m guitarz.static_build
+        # GitHub Pages takes 100 MB files, so this site carries MuseScore
+        # General and GeneralUser GS too (the Cloudflare build cannot).
+        run: python -m guitarz.static_build --all-soundfonts
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

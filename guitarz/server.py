@@ -17,6 +17,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .soundfonts import SOUNDFONT_EXTENSIONS, SOUNDFONT_LABELS, soundfont_label  # noqa: F401
+
 #: File extensions exposed by the API — every generation alphaTab can parse,
 #: including .gpx (Guitar Pro 6), which many free tab sites hand out.
 #: See tests/test_server.py for the filtering contract.
@@ -35,20 +37,10 @@ SOUNDFONT_DIR = STATIC_DIR / "vendor" / "alphatab" / "soundfont"
 #: URL prefix at which the static mount exposes :data:`SOUNDFONT_DIR`.
 SOUNDFONT_URL_PREFIX = "/vendor/alphatab/soundfont/"
 
-#: SoundFont formats alphaTab's synth reads (.sf3 = Vorbis-compressed samples).
-SOUNDFONT_EXTENSIONS = {".sf2", ".sf3"}
-
 #: Default-font preference order: the richer MuseScore General first, then the
 #: tiny sonivox font that alphaTab ships and fetch_vendor.sh always downloads.
 DEFAULT_SOUNDFONTS = ("MuseScore_General.sf3", "sonivox.sf2")
 
-#: Curated menu labels for the fonts fetch_vendor.sh installs; any other font
-#: dropped into the folder is labeled by its file stem.
-SOUNDFONT_LABELS = {
-    "MuseScore_General.sf3": "MuseScore General",
-    "GeneralUser-GS.sf2": "GeneralUser GS",
-    "sonivox.sf2": "Sonivox (light)",
-}
 
 
 def create_app(root: Path, soundfont_dir: Path | None = None) -> FastAPI:
@@ -195,7 +187,7 @@ def create_app(root: Path, soundfont_dir: Path | None = None) -> FastAPI:
                 fonts.append(
                     {
                         "file": entry.name,
-                        "label": SOUNDFONT_LABELS.get(entry.name, entry.stem),
+                        "label": soundfont_label(entry.name),
                         "url": SOUNDFONT_URL_PREFIX + quote(entry.name),
                     }
                 )

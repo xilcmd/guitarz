@@ -53,6 +53,9 @@ vanilla-JS frontend on alphaTab (score rendering + SoundFont playback).
 - `guitarz/server.py` — FastAPI app factory (`create_app`), `/api/browse`, `/api/file`,
   path-traversal guard, `EXTENSIONS` allowlist, `/api/soundfonts` catalog (scans
   `static/vendor/alphatab/soundfont/`; default preference in `DEFAULT_SOUNDFONTS`)
+- `guitarz/soundfonts.py` — known SoundFonts: labels and license files (stdlib only;
+  shared by the server catalog and `static_build.py`, whose `--all-soundfonts` the
+  Pages workflow uses)
 - `guitarz/__main__.py` — CLI entry point; `default_root()` = `$GUITARZ_ROOT` or `~/gps`
 - `~/gps` — the user's Guitar Pro collection, kept OUT of the repo (`gps/` is gitignored)
 - `static/js/` — `app.js` (boot; resolves the SoundFont before alphaTab init),
